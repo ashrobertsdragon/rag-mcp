@@ -1,3 +1,5 @@
+"""A RAG (Retrieval Augmented Generation) system for markdown files."""
+
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -20,13 +22,17 @@ class RagResponse(BaseModel):
     content: str
 
 
-class RAG:
+class MarkdownRAG:
+    """A RAG (Retrieval Augmented Generation) system for markdown files."""
+
     def __init__(
         self,
+        directory: Path,
+        *,
         vector_store: VectorStore,
         embeddings_model: Embeddings,
-        directory: Path,
     ):
+        """Initialize the RAG system with a directory of markdown files."""
         self.vector_store = vector_store
         self.embeddings_model = embeddings_model
         self.directory = directory
@@ -74,7 +80,8 @@ class RAG:
         ]
 
 
-def start_store(directory: Path) -> RAG:
+def start_store(directory: Path) -> MarkdownRAG:
+    """Initialize the RAG system with a directory of markdown files."""
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001", task_type="RETRIEVAL_DOCUMENT"
     )
@@ -83,10 +90,13 @@ def start_store(directory: Path) -> RAG:
         collection_name=directory.name,
         connection="postgresql+psycopg://...",
     )
-    return RAG(store, embeddings, directory)
+    return MarkdownRAG(
+        directory, vector_store=store, embeddings_model=embeddings
+    )
 
 
-def run_mcp(rag: RAG) -> None:
+def run_mcp(rag: MarkdownRAG) -> None:
+    """Run the MCP server."""
     mcp = FastMCP()
 
     @mcp.tool()
@@ -97,6 +107,7 @@ def run_mcp(rag: RAG) -> None:
 
 
 def main():
+    """Entry point for the RAG system."""
     directory = Path(sys.argv[1])
     rag = start_store(directory)
     if len(sys.argv) < 2 or sys.argv[2] not in ["mcp", "ingest"]:
