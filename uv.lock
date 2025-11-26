@@ -660,6 +660,7 @@ dependencies = [
     { name = "langchain-postgres" },
     { name = "langchain-text-splitters" },
     { name = "mcp" },
+    { name = "pydantic-settings" },
 ]
 
 [package.metadata]
@@ -669,6 +670,7 @@ requires-dist = [
     { name = "langchain-postgres", specifier = ">=0.0.16" },
     { name = "langchain-text-splitters", specifier = ">=1.0.0" },
     { name = "mcp", specifier = ">=1.22.0" },
+    { name = "pydantic-settings", specifier = ">=2.12.0" },
 ]
 
 [[package]]

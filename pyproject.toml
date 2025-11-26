@@ -10,4 +10,5 @@ dependencies = [
     "langchain-postgres>=0.0.16",
     "langchain-text-splitters>=1.0.0",
     "mcp>=1.22.0",
+    "pydantic-settings>=2.12.0",
 ]
