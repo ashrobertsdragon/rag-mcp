@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import (
     AliasChoices,
     BaseModel,
+    ConfigDict,
     Field,
     field_serializer,
     PostgresDsn,
@@ -50,6 +51,12 @@ class LogLevel(IntEnum):
 class RagResponse(BaseModel):
     source: str
     content: str
+
+
+class ErrorResponse(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    error: Exception
 
 
 class Env(BaseSettings):
@@ -286,15 +293,25 @@ class MarkdownRAG:
     def ingest(self) -> None:
         logger.info(f"Ingesting files from {self.directory}")
         for file, pth in self._iterate_paths(self.directory):
-            logger.info(f"Ingesting {pth}")
+            filename = str(pth.relative_to(self.directory))
+
+            existing_docs = self.vector_store.similarity_search(
+                "", k=1, filter={"filename": {"$eq": filename}}
+            )
+
+            if existing_docs:
+                logger.info(f"Skipping {filename} (already in vector store)")
+                continue
+
+            logger.info(f"Ingesting {filename}")
             self.vector_store.add_documents(
                 self._split_text(file),
-                metadata={"filename": str(pth.relative_to(self.directory))},
+                metadata={"filename": filename},
             )
 
     def query(self, query: str) -> list[RagResponse]:
         """Retrieve information to help answer a query."""
-        docs = self.vector_store.similarity_search(query, k=2)
+        docs = self.vector_store.similarity_search(query)
         return [
             RagResponse(
                 source=doc.metadata["filename"], content=doc.page_content
@@ -339,8 +356,12 @@ def run_mcp(rag: MarkdownRAG) -> None:
     mcp = FastMCP()
 
     @mcp.tool()
-    def query(query: str) -> list[RagResponse]:
-        return rag.query(query)
+    def query(query: str) -> list[RagResponse] | ErrorResponse:
+        try:
+            return rag.query(query)
+        except Exception as e:
+            logger.exception(f"Failed to query: {e}")
+            return ErrorResponse(error=e)
 
     mcp.run(transport="stdio")
 
@@ -351,10 +372,18 @@ def main():
     args = CliApp.run(CLIArgs)
     logging.basicConfig(level=args.level.value)
     logger.debug(f"Log level set to {logger.getEffectiveLevel()}")
-    rag = start_store(args.directory, settings)
+    try:
+        rag = start_store(args.directory, settings)
+    except Exception as e:
+        logger.exception(f"Failed to start store: {e}")
+        exit(1)
     if args.command == Command.INGEST:
         logger.debug("Ingesting files")
-        rag.ingest()
+        try:
+            rag.ingest()
+        except Exception as e:
+            logger.exception(f"Failed to ingest files: {e}")
+            exit(1)
     elif args.command == Command.MCP:
         logger.debug("Starting MCP server")
         run_mcp(rag)
