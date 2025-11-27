@@ -1,10 +1,13 @@
 """A RAG (Retrieval Augmented Generation) system for markdown files."""
 
 import logging
+import sys
 import time
 from collections import deque
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from enum import IntEnum, StrEnum
+from functools import lru_cache, partial
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -22,9 +25,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_serializer,
     PostgresDsn,
     SecretStr,
+    field_serializer,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -37,11 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 class Command(StrEnum):
+    """Commands for the RAG system."""
+
     INGEST = "ingest"
     MCP = "mcp"
 
 
 class LogLevel(IntEnum):
+    """Log levels for the RAG system."""
+
     DEBUG = 10
     INFO = 20
     WARNING = 30
@@ -49,17 +56,23 @@ class LogLevel(IntEnum):
 
 
 class RagResponse(BaseModel):
+    """MCP response for the RAG system."""
+
     source: str
     content: str
 
 
 class ErrorResponse(BaseModel):
+    """MCP error response for the RAG system."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     error: Exception
 
 
 class Env(BaseSettings):
+    """Environment variable loading."""
+
     model_config = SettingsConfigDict(env_file=".env")
 
     POSTGRES_USER: str = Field(default="postgres")
@@ -78,15 +91,15 @@ class Env(BaseSettings):
 
     @field_serializer("GOOGLE_API_KEY", "POSTGRES_PASSWORD", when_used="always")
     def dump_secret(self, v: SecretStr) -> str:
+        """Get secret value."""
         return v.get_secret_value()
 
     @property
     def postgres_connection(self) -> str:
         """Postgres connection string."""
         schema = "postgresql+psycopg"
-        auth = (
-            f"{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD.get_secret_value()}"
-        )
+        pw = self.POSTGRES_PASSWORD.get_secret_value()
+        auth = f"{self.POSTGRES_USER}:{pw}"
         url = f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}"
 
         return PostgresDsn(
@@ -95,6 +108,8 @@ class Env(BaseSettings):
 
 
 class CLIArgs(BaseSettings):
+    """Command line parser."""
+
     model_config = SettingsConfigDict(
         cli_exit_on_error=True, cli_parse_args=True
     )
@@ -105,6 +120,14 @@ class CLIArgs(BaseSettings):
     level: LogLevel = Field(
         default=LogLevel.WARNING, validation_alias=AliasChoices("l", "level")
     )
+
+
+@dataclass
+class Request:
+    """Single embedding request record metadata."""
+
+    timestamp: float
+    token_count: int
 
 
 class RateLimiter:
@@ -118,18 +141,58 @@ class RateLimiter:
 
     def __init__(
         self,
+        tokenizer: Callable[[str], int],
         max_requests_per_minute: int = 100,
+        max_tokens_per_minute: int = 30000,
         max_requests_per_day: int = 1000,
     ):
-        self._requests: deque[float] = deque()
+        """Constructor for RateLimiter.
+
+        Args:
+            tokenizer: Tokenizer function
+            max_requests_per_minute: Maximum requests per minute
+            max_tokens_per_minute: Maximum tokens per minute
+            max_requests_per_day: Maximum requests per day
+        """
+        self._requests: deque[Request] = deque()
+        self._tokenizer = tokenizer
         self.max_requests_per_minute = max_requests_per_minute
+        self.max_tokens_per_minute = max_tokens_per_minute
         self.max_requests_per_day = max_requests_per_day
 
     def _cleanup_old_records(self, current_time: float) -> None:
         """Remove records outside the daily window."""
         cutoff = current_time - self.day_window
-        while self._requests and self._requests[0] < cutoff:
+        while self._requests and self._requests[0].timestamp < cutoff:
             self._requests.popleft()
+
+    @lru_cache(maxsize=20)
+    def _get_token_count(self, prompt: str) -> int:
+        """Request token count from tokenizer.
+
+        Args:
+            prompt: Prompt to count tokens for
+
+        Returns:
+            int: Token count
+        """
+        new_tokens = self._tokenizer(prompt)
+        return new_tokens
+
+    def _count_recent_tokens(self, tokens: int, current_time: float) -> int:
+        """Count tokens within a time window.
+
+        Args:
+            tokens: Tokens to add
+
+        Returns:
+            int: token_count within the window
+        """
+        for request in reversed(self._requests):
+            if request.timestamp < current_time - self.minute_window:
+                break
+            tokens += request.token_count
+        return tokens
 
     def _count_recent(self, current_time: float, window: float) -> int:
         """Count requests and within a time window.
@@ -139,8 +202,8 @@ class RateLimiter:
         """
         cutoff = current_time - window
         requests = 0
-        for timestamp in reversed(self._requests):
-            if timestamp < cutoff:
+        for request in reversed(self._requests):
+            if request.timestamp < cutoff:
                 break
             requests += 1
         return requests
@@ -153,16 +216,19 @@ class RateLimiter:
             return 0.0
 
         cutoff = current_time - window
-        for timestamp in self._requests:
-            if timestamp > cutoff:
+        for request in self._requests:
+            timestamp = request.timestamp
+            if request.timestamp > cutoff:
                 return timestamp - cutoff
         return 0.0
 
-    def wait_if_needed(self) -> None:
+    def wait_if_needed(self, prompt: str = "") -> None:
         """Block until the request can proceed within rate limits."""
         current_time = time.time()
         self._cleanup_old_records(current_time)
 
+        tokens = self._get_token_count(prompt)
+        token_requests = self._count_recent_tokens(tokens, current_time)
         minute_requests = self._count_recent(current_time, self.minute_window)
         day_requests = self._count_recent(current_time, self.day_window)
 
@@ -178,24 +244,33 @@ class RateLimiter:
             day_requests,
             self.max_requests_per_day,
         )
+        token_wait = self._calculate_wait_time_for_limit(
+            current_time=current_time,
+            window=self.minute_window,
+            count=token_requests,
+            max_count=self.max_tokens_per_minute,
+        )
 
-        wait_time = max(minute_wait, day_wait)
+        wait_time = max(minute_wait, day_wait, token_wait)
 
         if wait_time <= 0:
-            self._requests.append(current_time)
+            self._requests.append(
+                Request(timestamp=current_time, token_count=tokens)
+            )
             logger.debug(
                 f"Request allowed: {minute_requests + 1} req/min, "
-                f"{day_requests + 1} req/day"
+                f"{day_requests + 1} req/day, {token_requests} tokens/min"
             )
             return
 
         logger.info(
             f"Rate limit approaching. Waiting {wait_time:.2f}s "
             f"(requests: {minute_requests}/{self.max_requests_per_minute}/min, "
-            f"{day_requests}/{self.max_requests_per_day}/day)"
+            f"{day_requests}/{self.max_requests_per_day}/day), "
+            f"Tokens: {token_requests} tokens/min"
         )
         time.sleep(wait_time)
-        self.wait_if_needed()
+        self.wait_if_needed(prompt)
 
 
 class RateLimitedEmbeddings(Embeddings):
@@ -227,7 +302,7 @@ class RateLimitedEmbeddings(Embeddings):
         Returns:
             List of embedding vectors
         """
-        self.rate_limiter.wait_if_needed()
+        self.rate_limiter.wait_if_needed("\n".join(texts))
         return self.embeddings.embed_documents(texts)
 
     def embed_query(self, text: str) -> list[float]:
@@ -239,8 +314,16 @@ class RateLimitedEmbeddings(Embeddings):
         Returns:
             Embedding vector
         """
-        self.rate_limiter.wait_if_needed()
+        self.rate_limiter.wait_if_needed(text)
         return self.embeddings.embed_query(text)
+
+    def __getattr__(self, name: str):
+        """Delegate attribute access to the underlying embeddings model.
+
+        This allows PGVector and other components to access attributes
+        like 'model', 'task_type', etc. from the wrapped embeddings.
+        """
+        return getattr(self.embeddings, name)
 
 
 class MarkdownRAG:
@@ -291,12 +374,13 @@ class MarkdownRAG:
         return docs
 
     def ingest(self) -> None:
+        """Add documents to the vector store."""
         logger.info(f"Ingesting files from {self.directory}")
         for file, pth in self._iterate_paths(self.directory):
             filename = str(pth.relative_to(self.directory))
 
             existing_docs = self.vector_store.similarity_search(
-                "", k=1, filter={"filename": {"$eq": filename}}
+                "check", k=1, filter={"filename": {"$eq": filename}}
             )
 
             if existing_docs:
@@ -328,9 +412,12 @@ def start_store(directory: Path, settings: Env) -> MarkdownRAG:
         task_type="RETRIEVAL_DOCUMENT",
         google_api_key=settings.GOOGLE_API_KEY,
     )
-
+    tokenizer = partial(
+        base_embeddings.client.models.count_tokens, model=base_embeddings.model
+    )
     logger.debug("Initializing rate limiter")
     rate_limiter = RateLimiter(
+        tokenizer=tokenizer,
         max_requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
         max_requests_per_day=settings.RATE_LIMIT_REQUESTS_PER_DAY,
     )
@@ -366,7 +453,7 @@ def run_mcp(rag: MarkdownRAG) -> None:
     mcp.run(transport="stdio")
 
 
-def main():
+def main() -> None:
     """Entry point for the RAG system."""
     settings = Env()
     args = CliApp.run(CLIArgs)
@@ -375,15 +462,15 @@ def main():
     try:
         rag = start_store(args.directory, settings)
     except Exception as e:
-        logger.exception(f"Failed to start store: {e}")
-        exit(1)
+        logger.exception(f"Failed to start store: {e}", exc_info=False)
+        sys.exit(1)
     if args.command == Command.INGEST:
         logger.debug("Ingesting files")
         try:
             rag.ingest()
         except Exception as e:
-            logger.exception(f"Failed to ingest files: {e}")
-            exit(1)
+            logger.exception(f"Failed to ingest files: {e}", exc_info=False)
+            sys.exit(1)
     elif args.command == Command.MCP:
         logger.debug("Starting MCP server")
         run_mcp(rag)
