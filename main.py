@@ -170,6 +170,8 @@ class RateLimiter:
     def _get_token_count(self, prompt: str) -> int:
         """Request token count from tokenizer.
 
+        Cached for recursive calls.
+
         Args:
             prompt: Prompt to count tokens for
 
@@ -194,7 +196,7 @@ class RateLimiter:
             tokens += request.token_count
         return tokens
 
-    def _count_recent(self, current_time: float, window: float) -> int:
+    def _count_recent_requests(self, current_time: float, window: float) -> int:
         """Count requests and within a time window.
 
         Returns:
@@ -222,15 +224,17 @@ class RateLimiter:
                 return timestamp - cutoff
         return 0.0
 
-    def wait_if_needed(self, prompt: str = "") -> None:
-        """Block until the request can proceed within rate limits."""
-        current_time = time.time()
-        self._cleanup_old_records(current_time)
-
-        tokens = self._get_token_count(prompt)
+    def _get_usage_and_wait_time(
+        self, current_time: float, tokens: int
+    ) -> tuple[float, int, int, int]:
+        """Get current usage stats and calculate the required wait time."""
         token_requests = self._count_recent_tokens(tokens, current_time)
-        minute_requests = self._count_recent(current_time, self.minute_window)
-        day_requests = self._count_recent(current_time, self.day_window)
+        minute_requests = self._count_recent_requests(
+            current_time, self.minute_window
+        )
+        day_requests = self._count_recent_requests(
+            current_time, self.day_window
+        )
 
         minute_wait = self._calculate_wait_time_for_limit(
             current_time,
@@ -245,24 +249,41 @@ class RateLimiter:
             self.max_requests_per_day,
         )
         token_wait = self._calculate_wait_time_for_limit(
-            current_time=current_time,
-            window=self.minute_window,
-            count=token_requests,
-            max_count=self.max_tokens_per_minute,
+            current_time,
+            self.minute_window,
+            token_requests,
+            self.max_tokens_per_minute,
         )
 
         wait_time = max(minute_wait, day_wait, token_wait)
+        return wait_time, token_requests, minute_requests, day_requests
 
-        if wait_time <= 0:
-            self._requests.append(
-                Request(timestamp=current_time, token_count=tokens)
-            )
-            logger.debug(
-                f"Request allowed: {minute_requests + 1} req/min, "
-                f"{day_requests + 1} req/day, {token_requests} tokens/min"
-            )
-            return
+    def _approve_request(
+        self,
+        current_time: float,
+        tokens: int,
+        minute_requests: int,
+        day_requests: int,
+        token_requests: int,
+    ) -> None:
+        """Log and record an approved request."""
+        self._requests.append(
+            Request(timestamp=current_time, token_count=tokens)
+        )
+        logger.debug(
+            f"Request allowed: {minute_requests + 1} req/min, "
+            f"{day_requests + 1} req/day, {token_requests} tokens/min"
+        )
 
+    def _wait_and_retry(
+        self,
+        wait_time: float,
+        minute_requests: int,
+        day_requests: int,
+        token_requests: int,
+        prompt: str,
+    ) -> None:
+        """Log the wait time and retry the request recursively."""
         logger.info(
             f"Rate limit approaching. Waiting {wait_time:.2f}s "
             f"(requests: {minute_requests}/{self.max_requests_per_minute}/min, "
@@ -271,6 +292,44 @@ class RateLimiter:
         )
         time.sleep(wait_time)
         self.wait_if_needed(prompt)
+
+    def wait_if_needed(self, prompt: str) -> None:
+        """Block until the request can proceed within rate limits.
+
+        Uses a sliding window algorithm to enforce limits per minute, day, and
+        token. Uses recursive calls until the request can proceed.
+
+        Args:
+            prompt: Prompt to count tokens for
+        """
+        current_time = time.time()
+        self._cleanup_old_records(current_time)
+
+        tokens = self._get_token_count(prompt)
+
+        (
+            wait_time,
+            token_requests,
+            minute_requests,
+            day_requests,
+        ) = self._get_usage_and_wait_time(current_time, tokens)
+
+        if wait_time <= 0:
+            self._approve_request(
+                current_time,
+                tokens,
+                minute_requests,
+                day_requests,
+                token_requests,
+            )
+        else:
+            self._wait_and_retry(
+                wait_time,
+                minute_requests,
+                day_requests,
+                token_requests,
+                prompt,
+            )
 
 
 class RateLimitedEmbeddings(Embeddings):
@@ -318,11 +377,7 @@ class RateLimitedEmbeddings(Embeddings):
         return self.embeddings.embed_query(text)
 
     def __getattr__(self, name: str):
-        """Delegate attribute access to the underlying embeddings model.
-
-        This allows PGVector and other components to access attributes
-        like 'model', 'task_type', etc. from the wrapped embeddings.
-        """
+        """Delegate attribute access to the underlying embeddings model."""
         return getattr(self.embeddings, name)
 
 
