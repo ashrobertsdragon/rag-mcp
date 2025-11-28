@@ -7,12 +7,13 @@ from collections import deque
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from functools import lru_cache, partial
+from functools import lru_cache
 from pathlib import Path
 
+from google.ai.generativelanguage_v1beta import GenerativeServiceClient
+from google.ai.generativelanguage_v1beta.types import Content, Part
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_core.vectorstores import VectorStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_text_splitters import (
@@ -35,6 +36,7 @@ from pydantic_settings import (
     CliPositionalArg,
     SettingsConfigDict,
 )
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +124,143 @@ class CLIArgs(BaseSettings):
     )
 
 
+class TokenCounter:
+    """Functor for counting tokens in a prompt."""
+
+    def __init__(self, client: GenerativeServiceClient, model: str):
+        """Initialize the token counter.
+
+        Args:
+            client: The generative AI client.
+            model: The model name to use for tokenization.
+        """
+        self.client = client
+        self.model = model
+
+    def __call__(self, prompt: str) -> int:
+        """Count tokens in a prompt.
+
+        Args:
+            prompt: The prompt string.
+
+        Returns:
+            The number of tokens in the prompt.
+        """
+        contents = [Content(parts=[Part(text=prompt)])]
+        response = self.client.count_tokens(model=self.model, contents=contents)
+        return response.total_tokens
+
+
 @dataclass
 class Request:
     """Single embedding request record metadata."""
 
     timestamp: float
     token_count: int
+
+
+@dataclass
+class UsageStats:
+    """Current API usage statistics."""
+
+    minute_requests: int
+    day_requests: int
+    minute_tokens: int
+
+
+class UsageTracker:
+    """Efficiently tracks API usage with cached statistics.
+
+    Maintains a sliding window of requests and provides O(1) amortized
+    access to current usage stats via caching.
+    """
+
+    def __init__(self, minute_window: float, day_window: float):
+        """Initialize the usage tracker.
+
+        Args:
+            minute_window: Time window in seconds for minute-based limits
+            day_window: Time window in seconds for day-based limits
+        """
+        self._requests: deque[Request] = deque()
+        self._minute_window = minute_window
+        self._day_window = day_window
+        self._cached_stats: UsageStats | None = None
+        self._cache_time: float = 0.0
+        self._cache_ttl: float = 0.1
+
+    def add_request(self, timestamp: float, tokens: int) -> None:
+        """Record a new request."""
+        self._requests.append(Request(timestamp, tokens))
+        self._invalidate_cache()
+
+    def cleanup_old(self, current_time: float) -> None:
+        """Remove requests outside the daily window."""
+        cutoff = current_time - self._day_window
+        while self._requests and self._requests[0].timestamp < cutoff:
+            self._requests.popleft()
+        self._invalidate_cache()
+
+    def get_stats(self, current_time: float) -> UsageStats:
+        """Get current usage statistics with caching."""
+        if (
+            self._cached_stats
+            and (current_time - self._cache_time) < self._cache_ttl
+        ):
+            return self._cached_stats
+
+        self._cached_stats = self._calculate_stats(current_time)
+        self._cache_time = current_time
+        return self._cached_stats
+
+    def find_oldest_in_window(
+        self, current_time: float, window: float
+    ) -> float | None:
+        """Find the oldest request timestamp within a window."""
+        cutoff = current_time - window
+        for req in self._requests:
+            if req.timestamp > cutoff:
+                return req.timestamp
+        return None
+
+    def _calculate_stats(self, current_time: float) -> UsageStats:
+        """Calculate usage stats by scanning the deque once."""
+        minute_cutoff = current_time - self._minute_window
+        day_cutoff = current_time - self._day_window
+
+        minute_requests = 0
+        day_requests = 0
+        minute_tokens = 0
+
+        for req in reversed(self._requests):
+            if req.timestamp >= minute_cutoff:
+                minute_requests += 1
+                minute_tokens += req.token_count
+            if req.timestamp >= day_cutoff:
+                day_requests += 1
+            else:
+                break
+
+        return UsageStats(minute_requests, day_requests, minute_tokens)
+
+    def _invalidate_cache(self) -> None:
+        """Invalidate the cached statistics."""
+        self._cached_stats = None
+
+
+@lru_cache(maxsize=20)
+def get_token_count(prompt: str, tokenizer: Callable[[str], int]) -> int:
+    """Request token count from tokenizer.
+
+    Cached for recursive calls.
+
+    Args:
+        prompt: Prompt to count tokens for
+
+    Returns:
+        int: Token count
+    """
+    return tokenizer(prompt)
 
 
 class RateLimiter:
@@ -154,182 +287,172 @@ class RateLimiter:
             max_tokens_per_minute: Maximum tokens per minute
             max_requests_per_day: Maximum requests per day
         """
-        self._requests: deque[Request] = deque()
+        self._tracker = UsageTracker(self.minute_window, self.day_window)
         self._tokenizer = tokenizer
         self.max_requests_per_minute = max_requests_per_minute
         self.max_tokens_per_minute = max_tokens_per_minute
         self.max_requests_per_day = max_requests_per_day
 
-    def _cleanup_old_records(self, current_time: float) -> None:
-        """Remove records outside the daily window."""
-        cutoff = current_time - self.day_window
-        while self._requests and self._requests[0].timestamp < cutoff:
-            self._requests.popleft()
-
-    @lru_cache(maxsize=20)
-    def _get_token_count(self, prompt: str) -> int:
-        """Request token count from tokenizer.
-
-        Cached for recursive calls.
-
-        Args:
-            prompt: Prompt to count tokens for
-
-        Returns:
-            int: Token count
-        """
-        new_tokens = self._tokenizer(prompt)
-        return new_tokens
-
-    def _count_recent_tokens(self, tokens: int, current_time: float) -> int:
-        """Count tokens within a time window.
-
-        Args:
-            tokens: Tokens to add
-
-        Returns:
-            int: token_count within the window
-        """
-        for request in reversed(self._requests):
-            if request.timestamp < current_time - self.minute_window:
-                break
-            tokens += request.token_count
-        return tokens
-
-    def _count_recent_requests(self, current_time: float, window: float) -> int:
-        """Count requests and within a time window.
-
-        Returns:
-            int: request_count within the window
-        """
-        cutoff = current_time - window
-        requests = 0
-        for request in reversed(self._requests):
-            if request.timestamp < cutoff:
-                break
-            requests += 1
-        return requests
-
-    def _calculate_wait_time_for_limit(
-        self, current_time: float, window: float, count: int, max_count: int
-    ) -> float:
-        """Calculate wait time needed for a specific rate limit."""
-        if count < max_count:
-            return 0.0
-
-        cutoff = current_time - window
-        for request in self._requests:
-            timestamp = request.timestamp
-            if request.timestamp > cutoff:
-                return timestamp - cutoff
-        return 0.0
-
-    def _get_usage_and_wait_time(
+    def _calculate_wait_time(
         self, current_time: float, tokens: int
-    ) -> tuple[float, int, int, int]:
-        """Get current usage stats and calculate the required wait time."""
-        token_requests = self._count_recent_tokens(tokens, current_time)
-        minute_requests = self._count_recent_requests(
-            current_time, self.minute_window
-        )
-        day_requests = self._count_recent_requests(
-            current_time, self.day_window
-        )
+    ) -> tuple[float, UsageStats]:
+        """Calculate wait time based on current usage and new tokens.
 
-        minute_wait = self._calculate_wait_time_for_limit(
-            current_time,
-            self.minute_window,
-            minute_requests,
-            self.max_requests_per_minute,
-        )
-        day_wait = self._calculate_wait_time_for_limit(
-            current_time,
-            self.day_window,
-            day_requests,
-            self.max_requests_per_day,
-        )
-        token_wait = self._calculate_wait_time_for_limit(
-            current_time,
-            self.minute_window,
-            token_requests,
-            self.max_tokens_per_minute,
-        )
+        Args:
+            current_time: Current timestamp
+            tokens: Number of tokens in the new request
 
-        wait_time = max(minute_wait, day_wait, token_wait)
-        return wait_time, token_requests, minute_requests, day_requests
+        Returns:
+            Tuple of (wait_time, current_usage_stats)
+        """
+        stats = self._tracker.get_stats(current_time)
+        total_tokens = stats.minute_tokens + tokens
 
-    def _approve_request(
-        self,
-        current_time: float,
-        tokens: int,
-        minute_requests: int,
-        day_requests: int,
-        token_requests: int,
+        wait_times = []
+
+        if stats.minute_requests >= self.max_requests_per_minute:
+            oldest = self._tracker.find_oldest_in_window(
+                current_time, self.minute_window
+            )
+            if oldest:
+                wait_times.append(oldest - (current_time - self.minute_window))
+
+        if stats.day_requests >= self.max_requests_per_day:
+            oldest = self._tracker.find_oldest_in_window(
+                current_time, self.day_window
+            )
+            if oldest:
+                wait_times.append(oldest - (current_time - self.day_window))
+
+        if total_tokens > self.max_tokens_per_minute:
+            oldest = self._tracker.find_oldest_in_window(
+                current_time, self.minute_window
+            )
+            if oldest:
+                wait_times.append(oldest - (current_time - self.minute_window))
+
+        return max(wait_times, default=0.0), stats
+
+    def _wait_and_log(
+        self, wait_time: float, stats: UsageStats, tokens: int
     ) -> None:
-        """Log and record an approved request."""
-        self._requests.append(
-            Request(timestamp=current_time, token_count=tokens)
-        )
-        logger.debug(
-            f"Request allowed: {minute_requests + 1} req/min, "
-            f"{day_requests + 1} req/day, {token_requests} tokens/min"
-        )
+        """Wait for the specified time and log the reason.
 
-    def _wait_and_retry(
-        self,
-        wait_time: float,
-        minute_requests: int,
-        day_requests: int,
-        token_requests: int,
-        prompt: str,
-    ) -> None:
-        """Log the wait time and retry the request recursively."""
+        Args:
+            wait_time: Time to wait in seconds
+            stats: Current usage statistics
+            tokens: Number of tokens in the pending request
+        """
         logger.info(
             f"Rate limit approaching. Waiting {wait_time:.2f}s "
-            f"(requests: {minute_requests}/{self.max_requests_per_minute}/min, "
-            f"{day_requests}/{self.max_requests_per_day}/day), "
-            f"Tokens: {token_requests} tokens/min"
+            f"(requests: {stats.minute_requests}/"
+            f"{self.max_requests_per_minute}/min, "
+            f"{stats.day_requests}/{self.max_requests_per_day}/day), "
+            f"Tokens: {stats.minute_tokens + tokens}/"
+            f"{self.max_tokens_per_minute} tokens/min"
         )
         time.sleep(wait_time)
-        self.wait_if_needed(prompt)
 
-    def wait_if_needed(self, prompt: str) -> None:
+    def _process_single_request(self, prompt: str) -> None:
+        """Process a single request, waiting if necessary.
+
+        Args:
+            prompt: The text prompt to process
+        """
+        tokens = get_token_count(prompt, self._tokenizer)
+        current_time = time.time()
+        self._tracker.cleanup_old(current_time)
+
+        wait_time, stats = self._calculate_wait_time(current_time, tokens)
+
+        if wait_time <= 0:
+            self._tracker.add_request(current_time, tokens)
+            logger.debug(
+                f"Request allowed: {stats.minute_requests + 1} req/min, "
+                f"{stats.day_requests + 1} req/day, "
+                f"{stats.minute_tokens + tokens} tokens/min"
+            )
+            return
+
+        self._wait_and_log(wait_time, stats, tokens)
+        self._process_single_request(prompt)
+
+    def _calculate_batch_size(
+        self, texts: list[str], current_time: float
+    ) -> int:
+        """Calculate max batch size that fits within current limits.
+
+        Args:
+            texts: List of text prompts to batch
+            current_time: Current timestamp
+
+        Returns:
+            Maximum number of texts that can be processed in current batch
+        """
+        stats = self._tracker.get_stats(current_time)
+
+        available_minute = self.max_requests_per_minute - stats.minute_requests
+        available_day = self.max_requests_per_day - stats.day_requests
+        available_tokens = self.max_tokens_per_minute - stats.minute_tokens
+
+        max_requests = min(available_minute, available_day)
+        if max_requests < 1:
+            return 0
+
+        cumulative_tokens = 0
+        for i, text in enumerate(texts):
+            if i >= max_requests:
+                return i
+
+            tokens = get_token_count(text, self._tokenizer)
+            if cumulative_tokens + tokens > available_tokens:
+                return max(1, i)
+            cumulative_tokens += tokens
+
+        return len(texts)
+
+    def generate_batches(
+        self, texts: list[str]
+    ) -> Generator[list[str], None, None]:
+        """Generate batches of texts that respect rate limits.
+
+        Handles waiting and approval internally. Each yielded batch is
+        ready to send to the API.
+
+        Args:
+            texts: List of texts to batch
+
+        Yields:
+            Batches of texts that can be processed without violating rate limits
+        """
+        while texts:
+            current_time = time.time()
+            self._tracker.cleanup_old(current_time)
+
+            batch_size = self._calculate_batch_size(texts, current_time)
+
+            if batch_size < 1:
+                self.wait_if_needed(texts)
+                continue
+
+            batch = texts[:batch_size]
+            self.wait_if_needed(batch)
+            yield batch
+
+            texts = texts[batch_size:]
+
+    def wait_if_needed(self, request: list[str] | str) -> None:
         """Block until the request can proceed within rate limits.
 
         Uses a sliding window algorithm to enforce limits per minute, day, and
-        token. Uses recursive calls until the request can proceed.
+        token. Processes each request sequentially to ensure rate limits.
 
         Args:
-            prompt: Prompt to count tokens for
+            request: Prompt or prompts to count tokens for
         """
-        current_time = time.time()
-        self._cleanup_old_records(current_time)
-
-        tokens = self._get_token_count(prompt)
-
-        (
-            wait_time,
-            token_requests,
-            minute_requests,
-            day_requests,
-        ) = self._get_usage_and_wait_time(current_time, tokens)
-
-        if wait_time <= 0:
-            self._approve_request(
-                current_time,
-                tokens,
-                minute_requests,
-                day_requests,
-                token_requests,
-            )
-        else:
-            self._wait_and_retry(
-                wait_time,
-                minute_requests,
-                day_requests,
-                token_requests,
-                prompt,
-            )
+        requests = request if isinstance(request, list) else [request]
+        for prompt in requests:
+            self._process_single_request(prompt)
 
 
 class RateLimitedEmbeddings(Embeddings):
@@ -340,7 +463,7 @@ class RateLimitedEmbeddings(Embeddings):
 
     def __init__(
         self,
-        embeddings: Embeddings,
+        embeddings: GoogleGenerativeAIEmbeddings,
         rate_limiter: RateLimiter,
     ):
         """Initialize with an embeddings model and rate limiter.
@@ -361,8 +484,11 @@ class RateLimitedEmbeddings(Embeddings):
         Returns:
             List of embedding vectors
         """
-        self.rate_limiter.wait_if_needed("\n".join(texts))
-        return self.embeddings.embed_documents(texts)
+        results: list[list[float]] = []
+        for batch in self.rate_limiter.generate_batches(texts):
+            logger.debug(f"Embedding batch of {len(batch)} documents")
+            results.extend(self.embeddings.embed_documents(batch))
+        return results
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a query with rate limiting.
@@ -388,7 +514,7 @@ class MarkdownRAG:
         self,
         directory: Path,
         *,
-        vector_store: VectorStore,
+        vector_store: PGVector,
         embeddings_model: Embeddings,
     ):
         """Initialize the RAG system with a directory of markdown files."""
@@ -428,17 +554,36 @@ class MarkdownRAG:
         logger.debug(f"Split file into {len(docs)} documents")
         return docs
 
+    def _document_exists(self, metadata: dict[str, str]) -> bool:
+        """Check if documents with given metadata exist in vector store."""
+        with self.vector_store._make_sync_session() as session:
+            collection = self.vector_store.get_collection(session)
+            filter_by = [
+                self.vector_store.EmbeddingStore.collection_id
+                == collection.uuid
+            ]
+
+            stmt = (
+                select(self.vector_store.EmbeddingStore.id)
+                .where(
+                    self.vector_store.EmbeddingStore.cmetadata.contains(
+                        metadata
+                    )
+                )
+                .filter(*filter_by)
+                .limit(1)
+            )
+
+            result = session.execute(stmt).first()
+            return result is not None
+
     def ingest(self) -> None:
         """Add documents to the vector store."""
         logger.info(f"Ingesting files from {self.directory}")
         for file, pth in self._iterate_paths(self.directory):
             filename = str(pth.relative_to(self.directory))
 
-            existing_docs = self.vector_store.similarity_search(
-                "check", k=1, filter={"filename": {"$eq": filename}}
-            )
-
-            if existing_docs:
+            if self._document_exists({"filename": filename}):
                 logger.info(f"Skipping {filename} (already in vector store)")
                 continue
 
@@ -467,8 +612,9 @@ def start_store(directory: Path, settings: Env) -> MarkdownRAG:
         task_type="RETRIEVAL_DOCUMENT",
         google_api_key=settings.GOOGLE_API_KEY,
     )
-    tokenizer = partial(
-        base_embeddings.client.models.count_tokens, model=base_embeddings.model
+    logger.debug("Initializing the token counter")
+    tokenizer = TokenCounter(
+        client=base_embeddings.client, model=base_embeddings.model
     )
     logger.debug("Initializing rate limiter")
     rate_limiter = RateLimiter(
