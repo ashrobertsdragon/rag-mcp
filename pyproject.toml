@@ -43,6 +43,7 @@ ignore_missing_imports = true
 check_untyped_defs = true
 follow_imports = "silent"
 warn_return_any = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 
 [dependency-groups]
 dev = [
