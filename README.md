@@ -346,6 +346,7 @@ chore: update dependencies
 
 ## TODOS
 
+
 - Add parameter to query tool to adjust number of documents retrieved.
 - Management of embeddings store via MCP tool.
 - Add support for other embeddings models.
