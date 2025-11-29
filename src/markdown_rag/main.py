@@ -57,9 +57,15 @@ def run_mcp(rag: MarkdownRAG) -> None:
     mcp = FastMCP()
 
     @mcp.tool()
-    def query(query: str) -> list[RagResponse] | ErrorResponse:
+    def query(
+        query: str, num_results: int = 4
+    ) -> list[RagResponse] | ErrorResponse:
+        if num_results <= 0:
+            return ErrorResponse(
+                error=ValueError("num_results must be a positive integer.")
+            )
         try:
-            return rag.query(query)
+            return rag.query(query, num_results=num_results)
         except Exception as e:
             logger.exception(f"Failed to query: {e}")
             return ErrorResponse(error=e)
@@ -89,7 +95,9 @@ def main() -> None:
         logger.debug("Starting MCP server")
         run_mcp(rag)
     else:
-        logger.error(f"Received command {args.command}, expected INGEST or MCP")
+        logger.error(
+            f"Received command {args.command}, expected INGEST or MCP"
+        )
 
 
 if __name__ == "__main__":
