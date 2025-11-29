@@ -57,9 +57,9 @@ def run_mcp(rag: MarkdownRAG) -> None:
     mcp = FastMCP()
 
     @mcp.tool()
-    def query(query: str) -> list[RagResponse] | ErrorResponse:
+    def query(query: str, num_results: int = 4) -> list[RagResponse] | ErrorResponse:
         try:
-            return rag.query(query)
+            return rag.query(query, num_results=num_results)
         except Exception as e:
             logger.exception(f"Failed to query: {e}")
             return ErrorResponse(error=e)
