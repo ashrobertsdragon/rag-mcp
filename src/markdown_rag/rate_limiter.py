@@ -36,7 +36,9 @@ class TokenCounter:
             The number of tokens in the prompt.
         """
         contents = [Content(parts=[Part(text=prompt)])]
-        response = self.client.count_tokens(model=self.model, contents=contents)
+        response = self.client.count_tokens(
+            model=self.model, contents=contents
+        )
         return response.total_tokens
 
 
@@ -312,7 +314,7 @@ class RateLimiter:
             texts: List of texts to batch
 
         Yields:
-            Batches of texts that can be processed without violating rate limits
+            Batches of texts to be processed without violating rate limits
         """
         while texts:
             current_time = time.time()
