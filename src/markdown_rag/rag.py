@@ -104,9 +104,9 @@ class MarkdownRAG:
                 metadata={"filename": filename},
             )
 
-    def query(self, query: str) -> list[RagResponse]:
+    def query(self, query: str, num_results: int = 4) -> list[RagResponse]:
         """Retrieve information to help answer a query."""
-        docs = self.vector_store.similarity_search(query)
+        docs = self.vector_store.similarity_search(query, k=num_results)
         return [
             RagResponse(
                 source=doc.metadata["filename"], content=doc.page_content
