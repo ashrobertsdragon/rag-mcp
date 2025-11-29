@@ -224,6 +224,9 @@ class RateLimiter:
 
         return max(wait_times, default=0.0), stats
 
+    MIN_LOG_INTERVAL = 60.0
+    MAX_LOG_INTERVAL = 1800.0
+
     def _get_log_interval(self, wait_time: float) -> float:
         """Determine the logging interval based on wait time.
 
@@ -233,8 +236,10 @@ class RateLimiter:
         Returns:
             The interval in seconds to log progress.
         """
-        # Formula: interval is half the wait time, clamped between 60s and 30m
-        return min(max(60.0, wait_time / 2.0), 1800.0)
+        # Formula: interval is half the wait time, clamped between min and max
+        return min(
+            max(self.MIN_LOG_INTERVAL, wait_time / 2.0), self.MAX_LOG_INTERVAL
+        )
 
     def _sleep_with_progress(self, wait_time: float, interval: float) -> None:
         """Sleep for the given time, logging progress at intervals.
@@ -243,14 +248,19 @@ class RateLimiter:
             wait_time: Total time to wait in seconds.
             interval: Interval in seconds to log progress.
         """
-        remaining = wait_time
-        while remaining > interval:
-            time.sleep(interval)
-            remaining -= interval
-            logger.info(f"Still waiting... {remaining:.2f}s remaining")
+        if wait_time <= 0:
+            return
 
-        if remaining > 0:
-            time.sleep(remaining)
+        end_time = time.monotonic() + wait_time
+
+        while (remaining := end_time - time.monotonic()) > interval:
+            time.sleep(interval)
+            # Re-calculate remaining time after sleep for accurate logging
+            if (current_remaining := end_time - time.monotonic()) > 0:
+                logger.info(f"Still waiting... {current_remaining:.2f}s remaining")
+
+        if (final_remaining := end_time - time.monotonic()) > 0:
+            time.sleep(final_remaining)
 
     def _wait_and_log(
         self, wait_time: float, stats: UsageStats, tokens: int

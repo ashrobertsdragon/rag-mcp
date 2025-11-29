@@ -346,7 +346,7 @@ chore: update dependencies
 
 ## TODOS
 
-- Add logging messages showing progress during long waits on rate limit cooldown (i.e. day limit).
+
 - Add parameter to query tool to adjust number of documents retrieved.
 - Management of embeddings store via MCP tool.
 - Add support for other embeddings models.
