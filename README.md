@@ -14,59 +14,46 @@ A Retrieval Augmented Generation (RAG) system for markdown documentation with in
 
 ## Installation
 
-### Prerequisites
+```bash
+git clone https://github.com/yourusername/markdown-rag.git
+```
+
+## Prerequisites
 
 - Python 3.11+
-- PostgreSQL 12+ with pgvector extension
+- PostgreSQL 12+ with [pgvector extension installed](https://github.com/pgvector/pgvector#installation)
 - Google Gemini API key
-
-### Using uv (Recommended)
-
-```bash
-git clone https://github.com/yourusername/markdown-rag.git
-cd markdown-rag
-uv sync
-```
-
-### Using pip
-
-```bash
-git clone https://github.com/yourusername/markdown-rag.git
-cd markdown-rag
-pip install -e .
-```
+- MCP-compatible client (Claude Desktop, Cline, etc.)
 
 ## Quick Start
 
-### 1. Configure Environment
-
-Create a `.env` file in the project root:
-
-```env
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_password
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=embeddings
-GOOGLE_API_KEY=your_gemini_api_key
-
-RATE_LIMIT_REQUESTS_PER_MINUTE=100
-RATE_LIMIT_REQUESTS_PER_DAY=1000
-```
-
-### 2. Set Up PostgreSQL
+### 1. Set Up PostgreSQL
 
 ```bash
 createdb embeddings
 ```
 
-### 3. Ingest Documents
+The pgvector extension will be automatically enabled when you first run the tool.
+
+### 2. Ingest Documents
 
 ```bash
-markdown-rag /path/to/docs --command ingest
+cd markdown-rag
+uv run markdown-rag /path/to/docs --command ingest
 ```
 
-### 4. Add the MCP server to your coding agent settings
+**Required environment variables** (create `.env` or export):
+
+```env
+POSTGRES_PASSWORD=your_password
+GOOGLE_API_KEY=your_gemini_api_key
+```
+
+### 3. Configure MCP Client
+
+Add to your MCP client configuration (e.g., `claude_desktop_config.json`). The client will automatically start the server.
+
+**Minimal configuration:**
 
 ```json
 {
@@ -75,67 +62,109 @@ markdown-rag /path/to/docs --command ingest
       "command": "uv",
       "args": [
         "run",
+        "--directory"
+        "/absolute/path/to/markdown-rag",
         "markdown-rag",
         "/absolute/path/to/docs",
         "--command",
         "mcp"
       ],
       "env": {
-        "POSTGRES_USER": "postgres",
         "POSTGRES_PASSWORD": "your_password",
-        "POSTGRES_HOST": "localhost",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "embeddings",
-        "GOOGLE_API_KEY": "your_gemini_api_key"
+        "GOOGLE_API_KEY": "your_api_key"
       }
     }
   }
 }
 ```
 
-### 5. Query via MCP
-
-The server exposes a `query` tool that can be called by any MCP client:
+**Full configuration:**
 
 ```json
 {
-  "tool": "query",
-  "arguments": {
-    "query": "How do I configure authentication?"
+  "mcpServers": {
+    "markdown-rag": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory"
+        "/absolute/path/to/markdown-rag",
+        "markdown-rag",
+        "/absolute/path/to/docs",
+        "--command",
+        "mcp"
+      ],
+      "env": {
+        "POSTGRES_USER": "postgres_username",
+        "POSTGRES_PASSWORD": "your_password",
+        "POSTGRES_HOST": "postgres_url",
+        "POSTGRES_PORT": "1234", # Postgres connection URL port number
+        "POSTGRES_DB": "embeddings",
+        "GOOGLE_API_KEY": "your_api_key",
+        "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
+        "RATE_LIMIT_REQUESTS_PER_DAY": "1000",
+        "DISABLED_TOOLS": "delete_document,update_document"
+      }
+    }
   }
 }
 ```
 
-Response:
+### 4. Query via MCP
 
-```json
-[
-  {
-    "source": "docs/setup/auth.md",
-    "content": "## Authentication Configuration\n\nTo configure authentication..."
-  }
-]
+The server exposes several tools:
+
+#### query
+
+- Semantic search over documentation
+- Arguments: `query` (string), `num_results` (integer, optional, default: 4)
+
+#### list_documents
+
+- List all ingested documents
+- Arguments: none
+
+#### delete_document
+
+- Remove a document from the index
+- Arguments: `filename` (string)
+
+#### update_document
+
+- Re-ingest a specific document
+- Arguments: `filename` (string)
+
+#### refresh_index
+
+- Scan directory and ingest new/modified files
+- Arguments: none
+
+To disable tools (e.g., in production), set `DISABLED_TOOLS` environment variable:
+
+```env
+DISABLED_TOOLS=delete_document,update_document,refresh_index
 ```
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable                         | Default      | Required | Description                 |
-| -------------------------------- | ------------ | -------- | --------------------------- |
-| `POSTGRES_USER`                  | `postgres`   | No       | PostgreSQL username         |
-| `POSTGRES_PASSWORD`              | -            | **Yes**  | PostgreSQL password         |
-| `POSTGRES_HOST`                  | `localhost`  | No       | PostgreSQL host             |
-| `POSTGRES_PORT`                  | `5432`       | No       | PostgreSQL port             |
-| `POSTGRES_DB`                    | `embeddings` | No       | Database name               |
-| `GOOGLE_API_KEY`                 | -            | **Yes**  | Google Gemini API key       |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100`        | No       | Max API requests per minute |
-| `RATE_LIMIT_REQUESTS_PER_DAY`    | `1000`       | No       | Max API requests per day    |
+| Variable                         | Default      | Required | Description                              |
+| -------------------------------- | ------------ | -------- | ---------------------------------------- |
+| `POSTGRES_USER`                  | `postgres`   | No       | PostgreSQL username                      |
+| `POSTGRES_PASSWORD`              | -            | **Yes**  | PostgreSQL password                      |
+| `POSTGRES_HOST`                  | `localhost`  | No       | PostgreSQL host                          |
+| `POSTGRES_PORT`                  | `5432`       | No       | PostgreSQL port                          |
+| `POSTGRES_DB`                    | `embeddings` | No       | Database name                            |
+| `GOOGLE_API_KEY`                 | -            | **Yes**  | Google Gemini API key                    |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100`        | No       | Max API requests per minute              |
+| `RATE_LIMIT_REQUESTS_PER_DAY`    | `1000`       | No       | Max API requests per day                 |
+| `DISABLED_TOOLS`                 | -            | No       | Comma-separated list of tools to disable |
 
 ### Command Line Options
 
 ```bash
-markdown-rag <directory> [OPTIONS]
+uv run markdown-rag <directory> [OPTIONS]
 ```
 
 **Arguments:**
@@ -148,19 +177,13 @@ markdown-rag <directory> [OPTIONS]
   - `ingest`: Process and store documents
   - `mcp`: Start MCP server for queries
 - `-l, --level {debug|info|warning|error}`: Logging level (default: `warning`)
-  - `debug`: DEBUG
-  - `info`: INFO
-  - `warning`: WARNING
-  - `error`: ERROR
 
 **Examples:**
 
 ```bash
-markdown-rag ./docs --command ingest --level info
+uv run markdown-rag ./docs --command ingest --level info
 
-markdown-rag ./knowledge-base --command mcp
-
-markdown-rag /var/docs -c ingest -l debug
+uv run markdown-rag /var/docs -c ingest -l debug
 ```
 
 ## Architecture
@@ -197,7 +220,6 @@ See [Architecture Documentation](docs/architecture.md) for detailed diagrams.
 ```bash
 git clone https://github.com/yourusername/markdown-rag.git
 cd markdown-rag
-
 uv sync
 ```
 
@@ -246,22 +268,11 @@ markdown-rag/
 
 #### "Failed to start store: connection refused"
 
-**Cause**: PostgreSQL not running or wrong connection settings
-
-**Solution**:
-
-```bash
-pg_ctl status
-
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-```
+PostgreSQL not running or wrong connection settings. Check your connection parameters in environment variables.
 
 #### "Rate limit exceeded"
 
-**Cause**: Hitting Google Gemini API rate limits
-
-**Solution**:
+Adjust rate limits in environment variables:
 
 ```env
 RATE_LIMIT_REQUESTS_PER_MINUTE=50
@@ -270,35 +281,17 @@ RATE_LIMIT_REQUESTS_PER_DAY=500
 
 #### "pgvector extension not found"
 
-**Cause**: pgvector extension not installed
-
-**Solution**:
-
-```bash
-psql embeddings -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
+The pgvector PostgreSQL extension is not installed. Follow the [pgvector installation guide](https://github.com/pgvector/pgvector#installation) for your platform.
 
 #### "Skipping all files (already in vector store)"
 
-**Cause**: Documents already ingested
-
-**Solution**: This is expected behavior. The system prevents duplicate ingestion for efficiency.
+Expected behavior. The system prevents duplicate ingestion.
 
 ### Logging
 
-Enable debug logging to troubleshoot:
-
 ```bash
-markdown-rag ./docs --command ingest --level debug
+uv run markdown-rag ./docs --command ingest --level debug
 ```
-
-Debug output includes:
-
-- Token counts per request
-- Rate limit calculations
-- Batch sizes
-- API wait times
-- Document processing progress
 
 ## Security
 
@@ -323,13 +316,13 @@ api_key = SecretStr("secret_value")
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make changes and add tests
-4. Run linters (`uv run ruff check .`)
-5. Run type checks (`uv run mypy src/`)
-6. Commit changes (`git commit -m 'feat: add amazing feature'`)
-7. Push to branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+1. Create a feature branch (`git checkout -b feature/amazing-feature`)
+1. Make changes and add tests
+1. Run linters (`uv run ruff check .`)
+1. Run type checks (`uv run mypy .`)
+1. Commit changes (`git commit -m 'feat: add amazing feature'`)
+1. Push to branch (`git push origin feature/amazing-feature`)
+1. Open a Pull Request
 
 ### Commit Message Format
 
@@ -345,7 +338,6 @@ chore: update dependencies
 ```
 
 ## TODOS
-
 
 - Management of embeddings store via MCP tool.
 - Add support for other embeddings models.

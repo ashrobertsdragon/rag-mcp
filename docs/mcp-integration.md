@@ -4,51 +4,36 @@ Complete guide for integrating the Markdown RAG system with Model Context Protoc
 
 ## Overview
 
-The Markdown RAG system exposes a `query` tool via the MCP protocol, allowing AI assistants like Claude to search your documentation and retrieve relevant information.
+The Markdown RAG system exposes tools via the MCP protocol, allowing AI assistants to search your documentation. The MCP client automatically starts and manages the server process.
 
 ## Quick Start
 
-Add the server to your MCP client configuration (e.g., Claude Desktop).
+### 1. Ingest Documents First
 
-### Claude Desktop Integration
+Before configuring the MCP server, ingest your documentation:
 
-Edit your Claude Desktop configuration file:
+```bash
+cd markdown-rag
+uv run markdown-rag /path/to/docs --command ingest
+```
 
-**Location:**
+Set environment variables (`.env` file or export):
+
+```env
+POSTGRES_PASSWORD=your_password
+GOOGLE_API_KEY=your_gemini_api_key
+```
+
+### 2. Configure MCP Client
+
+Add to your MCP client configuration file:
+
+**Claude Desktop locations:**
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-**Configuration:**
-
-```json
-{
-  "mcpServers": {
-    "markdown-rag": {
-      "command": "markdown-rag",
-      "args": ["/absolute/path/to/docs", "--command", "mcp"],
-      "env": {
-        "POSTGRES_USER": "postgres",
-        "POSTGRES_PASSWORD": "your_password",
-        "POSTGRES_HOST": "localhost",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "embeddings",
-        "GOOGLE_API_KEY": "your_gemini_api_key"
-      }
-    }
-  }
-}
-```
-
-**Important Notes:**
-
-- Use absolute paths for the directory argument
-- Include all required environment variables
-- Restart Claude Desktop after configuration changes
-
-### Using with uv
-
-If you installed with uv, use the full path to the executable:
+**Minimal configuration:**
 
 ```json
 {
@@ -57,41 +42,55 @@ If you installed with uv, use the full path to the executable:
       "command": "uv",
       "args": [
         "run",
+        "--directory",
+        "/absolute/path/to/markdown-rag",
         "markdown-rag",
         "/absolute/path/to/docs",
         "--command",
         "mcp"
       ],
       "env": {
-        "POSTGRES_USER": "postgres",
         "POSTGRES_PASSWORD": "your_password",
-        "POSTGRES_HOST": "localhost",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "embeddings",
-        "GOOGLE_API_KEY": "your_gemini_api_key"
+        "GOOGLE_API_KEY": "your_api_key"
       }
     }
   }
 }
 ```
 
-### Environment Variables via .env
-
-Instead of hardcoding credentials in the configuration, you can use a `.env` file:
+**Full configuration:**
 
 ```json
 {
   "mcpServers": {
     "markdown-rag": {
-      "command": "markdown-rag",
-      "args": ["/path/to/docs", "--command", "mcp"],
-      "cwd": "/path/to/project"
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/absolute/path/to/markdown-rag",
+        "markdown-rag",
+        "/absolute/path/to/docs",
+        "--command",
+        "mcp"
+      ],
+      "env": {
+        "POSTGRES_USER": "postgres_username",
+        "POSTGRES_PASSWORD": "your_password",
+        "POSTGRES_HOST": "postgres_url",
+        "POSTGRES_PORT": "1234", # Postgres connection URL port number
+        "POSTGRES_DB": "embeddings",
+        "GOOGLE_API_KEY": "your_api_key",
+        "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
+        "RATE_LIMIT_REQUESTS_PER_DAY": "1000",
+        "DISABLED_TOOLS": "delete_document,update_document"
+      }
     }
   }
 }
 ```
 
-The server will load environment variables from `.env` in the working directory.
+Restart your MCP client after configuration changes.
 
 ## Available Tools
 
@@ -108,6 +107,10 @@ Semantic search over ingested markdown documentation.
     "query": {
       "type": "string",
       "description": "Natural language search query"
+    },
+    "num_results": {
+      "type": "integer",
+      "description": "Number of results to return (default: 4)"
     }
   },
   "required": ["query"]
@@ -120,7 +123,8 @@ Semantic search over ingested markdown documentation.
 {
   "tool": "query",
   "arguments": {
-    "query": "How do I configure authentication?"
+    "query": "How do I configure authentication?",
+    "num_results": 4
   }
 }
 ```
@@ -147,6 +151,81 @@ Semantic search over ingested markdown documentation.
   "error": "Exception details here"
 }
 ```
+
+### list_documents
+
+List all documents currently in the vector store.
+
+#### Example Request
+
+```json
+{
+  "tool": "list_documents",
+  "arguments": {}
+}
+```
+
+#### Success Response
+
+```json
+[
+  "docs/api/auth.md",
+  "docs/setup/installation.md"
+]
+```
+
+### delete_document
+
+Remove a document from the vector store.
+
+#### Example Request
+
+```json
+{
+  "tool": "delete_document",
+  "arguments": {
+    "filename": "docs/old-file.md"
+  }
+}
+```
+
+### update_document
+
+Re-ingest a specific document, updating its embeddings.
+
+#### Example Request
+
+```json
+{
+  "tool": "update_document",
+  "arguments": {
+    "filename": "docs/updated-file.md"
+  }
+}
+```
+
+### refresh_index
+
+Scan the directory and ingest any new or modified files.
+
+#### Example Request
+
+```json
+{
+  "tool": "refresh_index",
+  "arguments": {}
+}
+```
+
+## Disabling Tools
+
+You can disable specific tools using the `DISABLED_TOOLS` environment variable. This is useful for restricting write access in production environments.
+
+```env
+DISABLED_TOOLS=delete_document,update_document,refresh_index
+```
+
+When a tool is disabled, it will not be registered with the MCP server and will be unavailable to clients.
 
 ## Usage Examples
 
@@ -203,63 +282,25 @@ Once configured, you can ask Claude to search your documentation:
 "What services communicate with the database?"
 ```
 
-## Server Lifecycle
-
-### Starting the Server
-
-```bash
-markdown-rag /path/to/docs --command mcp
-```
-
-The server:
-
-1. Loads environment variables
-2. Connects to PostgreSQL
-3. Initializes the embeddings model
-4. Sets up rate limiting
-5. Starts listening on stdio
-
-### Error Handling
-
-The server logs errors but remains running for:
-
-- Query failures
-- Rate limit violations
-- Database connection issues (retries)
-
-The server exits for:
-
-- Configuration errors
-- Fatal database errors
-- Missing dependencies
-
 ## Logging and Debugging
 
 ### Enable Debug Logging
 
+Add `--level debug` to the args in your MCP client configuration:
+
 ```json
-{
-  "mcpServers": {
-    "markdown-rag": {
-      "command": "markdown-rag",
-      "args": [
-        "/path/to/docs",
-        "--command",
-        "mcp",
-        "--level",
-        "debug"
-      ],
-      "env": { ... }
-    }
-  }
-}
+"args": [
+  "run",
+  "--directory",
+  "/absolute/path/to/markdown-rag",
+  "markdown-rag",
+  "/absolute/path/to/docs",
+  "--command",
+  "mcp",
+  "--level",
+  "debug"
+]
 ```
-
-**Log Levels:**
-
-- `debug`: All details including queries, rate limits, embeddings
-- `info`: Query results, connection status (default)
-- `error`: Errors only
 
 ### Viewing Logs
 
@@ -268,209 +309,32 @@ The server exits for:
 - macOS: `~/Library/Logs/Claude/mcp*.log`
 - Windows: `%APPDATA%\Claude\logs\mcp*.log`
 
-**Example Debug Output:**
-
-```text
-DEBUG:MarkdownRAG:Initializing embeddings model connection
-DEBUG:MarkdownRAG:Initializing rate limiter
-DEBUG:MarkdownRAG:Initializing vector store
-INFO:MarkdownRAG:MCP server started
-DEBUG:MarkdownRAG:Received query: "How do I configure auth?"
-DEBUG:RateLimiter:Request allowed: 1 req/min, 1 req/day, 24 tokens/min
-DEBUG:MarkdownRAG:Found 4 relevant documents
-INFO:MarkdownRAG:Query completed in 0.34s
-```
-
-### Rate Limit Tuning
-
-Rate limit defaults are based on free tier. Adjust for your tier:
-
-```env
-RATE_LIMIT_REQUESTS_PER_MINUTE=100
-RATE_LIMIT_REQUESTS_PER_DAY=1000
-```
-
 ## Security Considerations
 
 ### Environment Variable Safety
 
-Never hardcode credentials in configuration files:
-
-```json
-{
-  "env": {
-    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
-    "GOOGLE_API_KEY": "${GOOGLE_API_KEY}"
-  }
-}
-```
-
-Use system environment variables or a `.env` file in a secure location.
-
-### Network Security
-
-**For remote PostgreSQL:**
-
-- Use SSL/TLS connections:
-
-   ```env
-   POSTGRES_HOST=db.example.com
-   POSTGRES_SSLMODE=require
-   ```
-
-- Restrict database access:
-
-   ```sql
-   CREATE USER rag_reader WITH PASSWORD 'secure_password';
-   GRANT SELECT ON ALL TABLES IN SCHEMA public TO rag_reader;
-   ```
-
-- Use firewall rules to limit connections
-
-### API Key Protection
-
-- Store Google API keys securely
-- Rotate keys regularly
-- Use separate keys for development and production
-- Monitor API usage for anomalies
+Avoid hardcoding credentials directly in configuration files. Use system environment variables or a `.env` file in a secure location.
 
 ## Troubleshooting
 
 ### Server Won't Start
 
-**Problem:** Server fails to start in Claude Desktop
-
-**Solutions:**
-
-- Check logs for specific error:
-
-   ```bash
-   tail -f ~/Library/Logs/Claude/mcp*.log
-   ```
-
-- Verify configuration syntax (valid JSON)
-- Test server manually:
-
-   ```bash
-   markdown-rag /path/to/docs --command mcp --level debug
-   ```
-
-- Check all paths are absolute
-- Verify all environment variables are set
+Check MCP client logs for errors. Verify configuration syntax, absolute paths, and required environment variables.
 
 ### No Results from Queries
 
-**Problem:** Queries return empty results
-
-**Solutions:**
-
-- Verify documents are ingested:
-
-   ```bash
-   markdown-rag /path/to/docs --command ingest --level info
-   ```
-
-- Check collection name matches directory name
-- Try a broader query
-- Verify database contains embeddings:
-
-   ```sql
-   SELECT COUNT(*) FROM langchain_pg_embedding;
-   ```
-
-### Slow Query Performance
-
-**Problem:** Queries take too long
-
-**Solutions:**
-
-- Check database indexes (advanced):
-
-   ```sql
-   CREATE INDEX ON langchain_pg_embedding USING ivfflat (embedding vector_cosine_ops);
-   ```
-
-- Monitor rate limiting delays (check logs)
-- Use SSD storage for PostgreSQL
+Ensure documents are ingested first. Check that collection name matches directory name.
 
 ### Rate Limit Errors
 
-**Problem:** Frequent rate limit violations
+Adjust rate limits in environment variables:
 
-**Solutions:**
-
-- Reduce request limits:
-
-   ```env
-   RATE_LIMIT_REQUESTS_PER_MINUTE=50
-   ```
-
-- Check API quota usage in Google Cloud Console
-- Upgrade API quota if needed
-- Review query patterns (avoid rapid repeated queries)
+```env
+RATE_LIMIT_REQUESTS_PER_MINUTE=50
+```
 
 ## Advanced Configuration
 
 ### Multiple Document Collections
 
-Serve multiple documentation sets:
-
-```json
-{
-  "mcpServers": {
-    "main-docs": {
-      "command": "markdown-rag",
-      "args": ["/path/to/main-docs", "--command", "mcp"],
-      "env": { ... }
-    },
-    "api-docs": {
-      "command": "markdown-rag",
-      "args": ["/path/to/api-docs", "--command", "mcp"],
-      "env": { ... }
-    }
-  }
-}
-```
-
-Each server instance uses its own collection in PostgreSQL.
-
-## Testing MCP Integration
-
-### Manual Testing
-
-Use the MCP Inspector tool:
-
-```bash
-npx @modelcontextprotocol/inspector markdown-rag /path/to/docs --command mcp
-```
-
-This opens a web interface to test the MCP server directly.
-
-## Best Practices
-
-### Documentation Structure
-
-- **Use clear headers:** Helps with semantic chunking
-- **Include context:** Standalone sections are more useful
-- **Avoid duplication:** Maintain single source of truth
-- **Regular updates:** Re-ingest when docs change
-
-### Query Optimization
-
-- **Be specific:** "How to configure OAuth2?" vs "authentication"
-- **Use natural language:** Questions work better than keywords
-- **Include context:** "How to debug production errors?" vs "debug"
-
-### Operational Practices
-
-- **Monitor logs:** Check for errors and performance issues
-- **Update regularly:** Re-ingest docs after changes
-- **Test queries:** Validate results for common questions
-- **Version control:** Track configuration changes
-
-## Support and Resources
-
-- **Documentation:** [User Guide](user-guide.md), [API Reference](api-reference.md)
-- **Architecture:** [Architecture Documentation](architecture.md)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/markdown-rag/issues)
-- **MCP Specification:** [Model Context Protocol](https://spec.modelcontextprotocol.io/)
+Configure multiple server instances in your MCP client, each with different directory paths. Each uses its own collection in PostgreSQL.
