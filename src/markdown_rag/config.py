@@ -53,19 +53,19 @@ class Env(BaseSettings):
     @field_validator("DISABLED_TOOLS", mode="before")
     def validate_disabled_tools(v: str | list[str] | None) -> list[str]:
         """Parse and validate comma delimited list."""
-        if v is None:
+        if not v:
             return []
         if isinstance(v, list):
-            tools = [tool.lower() for tool in v]
+            tools = [tool.strip().lower() for tool in v if tool.strip()]
         else:
-            tools = [tool.lower() for tool in v.split(",")]
-        allowed_tools = [
+            tools = [tool.strip().lower() for tool in v.split(",") if tool.strip()]
+        allowed_tools = {
             "query",
             "refresh_index",
             "delete_document",
             "update_document",
             "list_documents",
-        ]
+        }
         for tool in tools:
             if tool not in allowed_tools:
                 raise ValueError(f"Invalid tool: {tool}")
