@@ -7,6 +7,8 @@ from pathlib import Path
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_postgres import PGVector
 from mcp.server.fastmcp import FastMCP
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from .config import Env, get_cli_args
 from .embeddings import RateLimitedEmbeddings
@@ -46,17 +48,24 @@ def start_store(directory: Path, settings: Env) -> MarkdownRAG:
         connection=settings.postgres_connection,
         logger=logger,
     )
+
+    logger.debug("Creating database session factory")
+    engine = create_engine(settings.postgres_connection)
+    session_factory = sessionmaker(bind=engine)
+
     logger.debug("Initializing RAG system")
     return MarkdownRAG(
-        directory, vector_store=store, embeddings_model=embeddings
+        directory,
+        vector_store=store,
+        embeddings_model=embeddings,
+        session_factory=session_factory,
     )
 
 
-def run_mcp(rag: MarkdownRAG) -> None:
+def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
     """Run the MCP server."""
     mcp = FastMCP()
 
-    @mcp.tool()
     def query(
         query: str, num_results: int = 4
     ) -> list[RagResponse] | ErrorResponse:
@@ -70,6 +79,49 @@ def run_mcp(rag: MarkdownRAG) -> None:
             logger.exception(f"Failed to query: {e}")
             return ErrorResponse(error=e)
 
+    def list_documents() -> list[str] | ErrorResponse:
+        """List all documents in the vector store."""
+        try:
+            return rag.list_documents()
+        except Exception as e:
+            logger.exception(f"Failed to list documents: {e}")
+            return ErrorResponse(error=e)
+
+    def delete_document(filename: str) -> bool | ErrorResponse:
+        """Delete a document from the vector store."""
+        try:
+            return rag.delete_document(filename)
+        except Exception as e:
+            logger.exception(f"Failed to delete document: {e}")
+            return ErrorResponse(error=e)
+
+    def update_document(filename: str) -> bool | ErrorResponse:
+        """Update/refresh a specific document in the vector store."""
+        try:
+            rag.refresh_document(filename)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to update document: {e}")
+            return ErrorResponse(error=e)
+
+    def refresh_index() -> bool | ErrorResponse:
+        """Refresh the entire index (ingest new files)."""
+        try:
+            rag.ingest()
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to refresh index: {e}")
+            return ErrorResponse(error=e)
+
+    for tool in [
+        query,
+        list_documents,
+        delete_document,
+        update_document,
+        refresh_index,
+    ]:
+        if tool.__name__ not in disabled_tools:
+            mcp.add_tool(tool)  # type: ignore
     mcp.run(transport="stdio")
 
 
@@ -93,11 +145,9 @@ def main() -> None:
             sys.exit(1)
     elif args.command == Command.MCP:
         logger.debug("Starting MCP server")
-        run_mcp(rag)
+        run_mcp(rag, disabled_tools=settings.DISABLED_TOOLS)
     else:
-        logger.error(
-            f"Received command {args.command}, expected INGEST or MCP"
-        )
+        logger.error(f"Received command {args.command}, expected INGEST or MCP")
 
 
 if __name__ == "__main__":

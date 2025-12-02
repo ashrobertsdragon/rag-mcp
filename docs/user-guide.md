@@ -8,8 +8,8 @@ Complete guide to using the Markdown RAG system for semantic search over your do
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Ingesting Documents](#ingesting-documents)
-- [Running the MCP Server](#running-the-mcp-server)
-- [Querying Documents](#querying-documents)
+- [Configuring MCP Client](#configuring-mcp-client)
+- [MCP Tools](#mcp-tools)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 
@@ -32,60 +32,18 @@ Before you begin, ensure you have:
 
 ## Installation
 
-### Step 1: Install PostgreSQL and pgvector
+### Prerequisites
 
-**On Ubuntu/Debian:**
+Install PostgreSQL and pgvector extension following the [pgvector installation guide](https://github.com/pgvector/pgvector#installation).
 
-```bash
-sudo apt update
-sudo apt install postgresql postgresql-contrib
-sudo apt install postgresql-17-pgvector
-```
-
-**On macOS (Homebrew):**
+### Setup
 
 ```bash
-brew install postgresql@17
-brew install pgvector
-```
-
-**On Windows:**
-
-Download PostgreSQL from [postgresql.org](https://www.postgresql.org/download/windows/) and install pgvector following the [official instructions](https://github.com/pgvector/pgvector#windows).
-
-### Step 2: Create Database
-
-```bash
+git clone https://github.com/yourusername/markdown-rag.git
 createdb embeddings
-
-psql embeddings -c "CREATE EXTENSION vector;"
 ```
 
-### Step 3: Install Markdown RAG
-
-**Using uv (recommended):**
-
-```bash
-git clone https://github.com/yourusername/markdown-rag.git
-cd markdown-rag
-uv sync
-```
-
-**Using pip:**
-
-```bash
-git clone https://github.com/yourusername/markdown-rag.git
-cd markdown-rag
-pip install -e .
-```
-
-### Step 4: Verify Installation
-
-```bash
-markdown-rag --help
-```
-
-You should see the help message with available commands and options.
+The pgvector extension will be automatically enabled when you first run the tool.
 
 ## Configuration
 
@@ -115,31 +73,25 @@ RATE_LIMIT_REQUESTS_PER_DAY=1000
 
 ### Configuration Options Explained
 
-| Variable                         | Purpose           | Default      | Notes                                            |
-| -------------------------------- | ----------------- | ------------ | ------------------------------------------------ |
-| `POSTGRES_USER`                  | Database username | `postgres`   | Use a dedicated user for production              |
-| `POSTGRES_PASSWORD`              | Database password | *required*   | Never commit this to version control             |
-| `POSTGRES_HOST`                  | Database server   | `localhost`  | Use hostname or IP for remote databases          |
-| `POSTGRES_PORT`                  | Database port     | `5432`       | PostgreSQL default port                          |
-| `POSTGRES_DB`                    | Database name     | `embeddings` | Create separate databases for different projects |
-| `GOOGLE_API_KEY`                 | Gemini API key    | *required*   | Get from Google AI Studio                        |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | API rate limit    | `100`        | Adjust based on your API quota                   |
-| `RATE_LIMIT_REQUESTS_PER_DAY`    | Daily API limit   | `1000`       | Adjust based on your API quota                   |
+| Variable                         | Purpose           | Default      | Notes                                                          |
+| -------------------------------- | ----------------- | ------------ | -------------------------------------------------------------- |
+| `POSTGRES_USER`                  | Database username | `postgres`   | Use a dedicated user for production                            |
+| `POSTGRES_PASSWORD`              | Database password | *required*   | Never commit this to version control                           |
+| `POSTGRES_HOST`                  | Database server   | `localhost`  | Use hostname or IP for remote databases                        |
+| `POSTGRES_PORT`                  | Database port     | `5432`       | PostgreSQL default port                                        |
+| `POSTGRES_DB`                    | Database name     | `embeddings` | Create separate databases for different projects               |
+| `GOOGLE_API_KEY`                 | Gemini API key    | *required*   | Get from Google AI Studio                                      |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | API rate limit    | `100`        | Adjust based on your API quota                                 |
+| `RATE_LIMIT_REQUESTS_PER_DAY`    | Daily API limit   | `1000`       | Adjust based on your API quota                                 |
+| `DISABLED_TOOLS`                 | Disabled tools    | -            | Comma-separated list (e.g., `delete_document,update_document`) |
 
 ## Ingesting Documents
 
 ### Basic Ingestion
 
-To ingest all markdown files from a directory:
-
 ```bash
-markdown-rag /path/to/docs --command ingest
-```
-
-**Example:**
-
-```bash
-markdown-rag ./documentation --command ingest
+cd markdown-rag
+uv run markdown-rag /path/to/docs --command ingest
 ```
 
 ### What Happens During Ingestion
@@ -152,65 +104,30 @@ markdown-rag ./documentation --command ingest
 
 ### Progress Monitoring
 
-Enable INFO-level logging to see ingestion progress:
-
 ```bash
-markdown-rag ./docs --command ingest --level info
+uv run markdown-rag ./docs --command ingest --level info
 ```
 
-Output:
+## Configuring MCP Client
 
-```text
-INFO:MarkdownRAG:Ingesting files from ./docs
-INFO:MarkdownRAG:Ingesting docs/getting-started.md
-INFO:MarkdownRAG:Ingesting docs/api/reference.md
-INFO:MarkdownRAG:Skipping docs/intro.md (already in vector store)
-```
-
-### Incremental Updates
-
-The system automatically skips documents that have already been ingested for efficiency.
-
-### Ingestion Performance
-
-Performance depends on:
-
-- Number of documents
-- Document size
-- API rate limits
-
-**Typical times:**
-
-- 100 files (~500KB): 2-3 minutes
-- 1000 files (~5MB): 20-30 minutes
-- 10000 files (~50MB): 3-5 hours
-
-## Running the MCP Server
-
-### Starting the Server
-
-```bash
-markdown-rag /path/to/docs --command mcp
-```
-
-The server runs on stdio and waits for MCP client connections.
-
-### Integrating with Claude Desktop
-
-Add to your Claude Desktop configuration (`claude_desktop_config.json`):
+**Minimal configuration:**
 
 ```json
 {
   "mcpServers": {
     "markdown-rag": {
-      "command": "markdown-rag",
-      "args": ["/path/to/docs", "--command", "mcp"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/absolute/path/to/markdown-rag/",
+        "markdown-rag",
+        "/absolute/path/to/docs",
+        "--command",
+        "mcp"
+      ],
       "env": {
-        "POSTGRES_USER": "postgres",
         "POSTGRES_PASSWORD": "your_password",
-        "POSTGRES_HOST": "localhost",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "embeddings",
         "GOOGLE_API_KEY": "your_api_key"
       }
     }
@@ -218,44 +135,131 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 }
 ```
 
-### Server Logging
+**Full configuration:**
 
-Enable debug logging for troubleshooting:
-
-```bash
-markdown-rag ./docs --command mcp --level debug
+```json
+{
+  "mcpServers": {
+    "markdown-rag": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/absolute/path/to/markdown-rag/",
+        "markdown-rag",
+        "/absolute/path/to/docs",
+        "--command",
+        "mcp"
+      ],
+      "env": {
+        "POSTGRES_USER": "postgres_username",
+        "POSTGRES_PASSWORD": "your_password",
+        "POSTGRES_HOST": "postgres_url",
+        "POSTGRES_PORT": "1234", # Postgres connection URL port number
+        "POSTGRES_DB": "embeddings",
+        "GOOGLE_API_KEY": "your_api_key",
+        "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
+        "RATE_LIMIT_REQUESTS_PER_DAY": "1000",
+        "DISABLED_TOOLS": "delete_document,update_document"
+      }
+    }
+  }
+}
 ```
 
-## Querying Documents
+## MCP Tools
 
-### Via MCP Client
+### query
 
-When connected via MCP, query using the `query` tool:
+Semantic search over documentation.
 
-**Query:**
+**Arguments:**
+
+- `query` (string, required)
+- `num_results` (integer, optional, default: 4)
+
+**Example:**
 
 ```json
 {
   "tool": "query",
   "arguments": {
-    "query": "How do I configure authentication?"
+    "query": "How do I configure authentication?",
+    "num_results": 4
   }
 }
 ```
 
-**Response:**
+### list_documents
+
+List all documents currently in the vector store.
+
+**Example:**
 
 ```json
-[
-  {
-    "source": "docs/setup/authentication.md",
-    "content": "## Authentication Configuration\n\nTo configure authentication..."
-  },
-  {
-    "source": "docs/api/auth.md",
-    "content": "### Auth Endpoints\n\nThe authentication API provides..."
+{
+  "tool": "list_documents",
+  "arguments": {}
+}
+```
+
+### delete_document
+
+Remove a document from the vector store.
+
+**Arguments:**
+
+- `filename` (string, required)
+
+**Example:**
+
+```json
+{
+  "tool": "delete_document",
+  "arguments": {
+    "filename": "docs/old-file.md"
   }
-]
+}
+```
+
+### update_document
+
+Re-ingest a specific document, updating its embeddings.
+
+**Arguments:**
+
+- `filename` (string, required)
+
+**Example:**
+
+```json
+{
+  "tool": "update_document",
+  "arguments": {
+    "filename": "docs/updated-file.md"
+  }
+}
+```
+
+### refresh_index
+
+Scan the directory and ingest any new or modified files.
+
+**Example:**
+
+```json
+{
+  "tool": "refresh_index",
+  "arguments": {}
+}
+```
+
+### Disabling Tools
+
+Set `DISABLED_TOOLS` environment variable:
+
+```env
+DISABLED_TOOLS=delete_document,update_document,refresh_index
 ```
 
 ### Query Tips
@@ -352,120 +356,23 @@ pg_dump embeddings > embeddings_backup.sql
 
 ### Connection Issues
 
-**Problem:** `Failed to start store: connection refused`
-
-**Solution:**
-
-1. Check PostgreSQL is running:
-
-   ```bash
-   pg_ctl status
-   ```
-
-1. Verify connection settings:
-
-   ```bash
-   psql -h localhost -U postgres -d embeddings
-   ```
-
-1. Check firewall rules if using remote database
+PostgreSQL not running or wrong connection settings. Check your connection parameters.
 
 ### API Rate Limits
 
-**Problem:** Slow ingestion or rate limit errors
+Adjust rate limits in environment variables:
 
-**Solution:**
-
-1. Check current limits:
-
-   ```bash
-   grep RATE_LIMIT .env
-   ```
-
-1. Reduce limits if hitting API quotas:
-
-   ```env
-   RATE_LIMIT_REQUESTS_PER_MINUTE=50
-   RATE_LIMIT_REQUESTS_PER_DAY=500
-   ```
-
-1. Monitor with debug logging:
-
-   ```bash
-   markdown-rag ./docs --command ingest --level debug
-   ```
+```env
+RATE_LIMIT_REQUESTS_PER_MINUTE=50
+RATE_LIMIT_REQUESTS_PER_DAY=500
+```
 
 ### pgvector Extension Missing
 
-**Problem:** `pgvector extension not found`
-
-**Solution:**
-
-```bash
-psql embeddings -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
-
-If installation fails, ensure pgvector is installed for your PostgreSQL version.
-
-**Windows users**: Ensure pgvector is installed via these recommended instructions; [PGVector Installation Guide for Windows 11](https://github.com/ranga-NSL/pgvector4windows/blob/main/pgvector_installation_guide.md)
-
-### Poor Search Results
-
-**Problem:** Queries return irrelevant documents
-
-**Solutions:**
-
-1. **Use more specific queries:**
-
-   - Instead of: "setup"
-   - Try: "How do I set up the development environment?"
-
-2. **Check document structure:**
-
-   - Ensure markdown has clear headers
-   - Avoid very long sections (>2000 chars without headers)
-
-### Memory Issues
-
-**Problem:** High memory usage during ingestion
-
-**Solution:**
-
-The system streams files and processes them in batches. Memory issues usually indicate:
-
-- Extremely large individual documents
-- Database connection issues causing backlog
-
-Try processing in smaller batches:
-
-```bash
-markdown-rag ./docs/subset1 --command ingest
-markdown-rag ./docs/subset2 --command ingest
-```
+The pgvector PostgreSQL extension is not installed. Follow the [pgvector installation guide](https://github.com/pgvector/pgvector#installation) for your platform.
 
 ### Logging and Debugging
 
-**Enable full debug output:**
-
 ```bash
-markdown-rag ./docs --command ingest --level debug 2>&1 | tee debug.log
+uv run markdown-rag ./docs --command ingest --level debug
 ```
-
-**Log levels:**
-
-- `debug`: All details including token counts, batch sizes
-- `info`: Progress updates, file names
-- `warning`: Only warnings and errors (default)
-- `error`: Only errors
-
-## Next Steps
-
-- Read the [API Reference](api-reference.md) for programmatic usage
-- See [Architecture Documentation](architecture.md) for system details
-- Join discussions and report issues on GitHub
-
-## Getting Help
-
-- **Documentation**: Check this guide and the API reference
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/yourusername/markdown-rag/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/yourusername/markdown-rag/discussions)

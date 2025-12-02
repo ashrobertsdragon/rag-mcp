@@ -97,7 +97,7 @@ sequenceDiagram
     participant Gemini
     participant PGVector
 
-    User->>CLI: markdown-rag /docs --command ingest
+    User->>CLI: uv run src/markdown_rag/main.py /docs --command ingest
     CLI->>MarkdownRAG: ingest()
 
     loop For each markdown file
@@ -236,21 +236,22 @@ This preserves semantic boundaries while maintaining manageable chunk sizes.
 
 ### Environment Variables
 
-| Variable                         | Default    | Description             |
-| -------------------------------- | ---------- | ----------------------- |
-| `POSTGRES_USER`                  | postgres   | PostgreSQL username     |
-| `POSTGRES_PASSWORD`              | *required* | PostgreSQL password     |
-| `POSTGRES_HOST`                  | localhost  | PostgreSQL host         |
-| `POSTGRES_PORT`                  | 5432       | PostgreSQL port         |
-| `POSTGRES_DB`                    | embeddings | Database name           |
-| `GOOGLE_API_KEY`                 | *required* | Google Gemini API key   |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | 100        | Max requests per minute |
-| `RATE_LIMIT_REQUESTS_PER_DAY`    | 1000       | Max requests per day    |
+| Variable                         | Default      | Required | Description                              |
+| -------------------------------- | ------------ | -------- | ---------------------------------------- |
+| `POSTGRES_USER`                  | `postgres`   | No       | PostgreSQL username                      |
+| `POSTGRES_PASSWORD`              | -            | **Yes**  | PostgreSQL password                      |
+| `POSTGRES_HOST`                  | `localhost`  | No       | PostgreSQL host                          |
+| `POSTGRES_PORT`                  | `5432`       | No       | PostgreSQL port                          |
+| `POSTGRES_DB`                    | `embeddings` | No       | Database name                            |
+| `GOOGLE_API_KEY`                 | -            | **Yes**  | Google Gemini API key                    |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100`        | No       | Max API requests per minute              |
+| `RATE_LIMIT_REQUESTS_PER_DAY`    | `1000`       | No       | Max API requests per day                 |
+| `DISABLED_TOOLS`                 | -            | No       | Comma-separated list of tools to disable |
 
-### Command Line Arguments
+### Command Line Options
 
 ```bash
-markdown-rag <directory> [options]
+uv run --directory path/to/markdown-rag markdown-rag <directory> [OPTIONS]
 ```
 
 Options:
@@ -298,39 +299,6 @@ Options:
 - Never logged or exposed
 - Passed directly to Google client
 - Field serialization controlled
-
-## Extensibility Points
-
-### Custom Embeddings
-
-Replace `GoogleGenerativeAIEmbeddings` with any LangChain-compatible embeddings model:
-
-```python
-from langchain_openai import OpenAIEmbeddings
-
-embeddings = OpenAIEmbeddings()
-rate_limited = RateLimitedEmbeddings(embeddings, rate_limiter)
-```
-
-### Custom Splitters
-
-Modify splitting strategy in `MarkdownRAG.__init__()`:
-
-```python
-self._md_splitter = MarkdownHeaderTextSplitter(
-    headers_to_split_on=[("#", "Header 1"), ("##", "Header 2")]
-)
-```
-
-### Custom Vector Store
-
-Replace PGVector with any LangChain vector store:
-
-```python
-from langchain_chroma import Chroma
-
-store = Chroma(embedding_function=embeddings, collection_name="my_docs")
-```
 
 ## Error Handling
 

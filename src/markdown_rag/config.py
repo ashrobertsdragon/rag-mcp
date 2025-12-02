@@ -7,7 +7,9 @@ from pydantic import (
     Field,
     PostgresDsn,
     SecretStr,
+    ValidationError,
     field_serializer,
+    field_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -38,10 +40,36 @@ class Env(BaseSettings):
         default=1000, description="Maximum requests per day"
     )
 
+    DISABLED_TOOLS: list[str] = Field(
+        default_factory=list,
+        description="Comma delimited list of MCP tools to disable",
+    )
+
     @field_serializer("GOOGLE_API_KEY", "POSTGRES_PASSWORD", when_used="always")
     def dump_secret(self, v: SecretStr) -> str:
         """Get secret value."""
         return v.get_secret_value()
+
+    @field_validator("DISABLED_TOOLS", mode="before")
+    def validate_disabled_tools(v: str | list[str] | None) -> list[str]:
+        """Parse and validate comma delimited list."""
+        if not v:
+            return []
+        if isinstance(v, list):
+            tools = [tool.strip().lower() for tool in v if tool.strip()]
+        else:
+            tools = [tool.strip().lower() for tool in v.split(",") if tool.strip()]
+        allowed_tools = {
+            "query",
+            "refresh_index",
+            "delete_document",
+            "update_document",
+            "list_documents",
+        }
+        for tool in tools:
+            if tool not in allowed_tools:
+                raise ValueError(f"Invalid tool: {tool}")
+        return tools
 
     @property
     def postgres_connection(self) -> str:

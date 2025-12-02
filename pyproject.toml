@@ -1,6 +1,6 @@
 [project]
 name = "markdown-rag"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Retrieval Augmented Generation (RAG) system for markdown documentation with intelligent rate limiting and MCP server integration."
 readme = "README.md"
 license = { text = "MIT" }

@@ -656,37 +656,15 @@ def run_mcp(rag: MarkdownRAG) -> None: ...
 
 - `rag` (MarkdownRAG): Initialized RAG system
 
-**Exposed Tools:**
+**Exposed MCP Tools:**
 
-#### query
+- `query(query: str, num_results: int = 4)` - Semantic search
+- `list_documents()` - List all ingested documents
+- `delete_document(filename: str)` - Remove a document
+- `update_document(filename: str)` - Re-ingest a document
+- `refresh_index()` - Scan for new/modified files
 
-```python
-def query(query: str) -> list[RagResponse] | ErrorResponse: ...
-```
-
-MCP tool for querying the RAG system.
-
-**Example MCP Call:**
-
-```json
-{
-  "tool": "query",
-  "arguments": {
-    "query": "How do I configure authentication?"
-  }
-}
-```
-
-**Response:**
-
-```json
-[
-  {
-    "source": "docs/auth.md",
-    "content": "## Authentication\n\nConfigure authentication by..."
-  }
-]
-```
+See [MCP Tools](#mcp-tools) section for detailed schemas and examples.
 
 ---
 
@@ -795,5 +773,128 @@ logger.error("Error message")
 Configure logging level via CLI:
 
 ```bash
-markdown-rag ./docs --level debug
+uv run src/markdown_rag/main.py ./docs --command ingest --level debug
+```
+
+## MCP Tools
+
+The MCP server exposes the following tools:
+
+### query
+
+Semantic search over ingested documentation.
+
+**Input Schema:**
+
+```json
+{
+  "query": "string",
+  "num_results": "integer (optional, default: 4)"
+}
+```
+
+**Example:**
+
+```json
+{
+  "tool": "query",
+  "arguments": {
+    "query": "How do I configure authentication?",
+    "num_results": 4
+  }
+}
+```
+
+### list_documents
+
+List all documents currently in the vector store.
+
+**Input Schema:**
+
+```json
+{}
+```
+
+**Example:**
+
+```json
+{
+  "tool": "list_documents",
+  "arguments": {}
+}
+```
+
+**Returns:** Array of document filenames
+
+### delete_document
+
+Remove a document from the vector store.
+
+**Input Schema:**
+
+```json
+{
+  "filename": "string"
+}
+```
+
+**Example:**
+
+```json
+{
+  "tool": "delete_document",
+  "arguments": {
+    "filename": "docs/old-file.md"
+  }
+}
+```
+
+### update_document
+
+Re-ingest a specific document, updating its embeddings.
+
+**Input Schema:**
+
+```json
+{
+  "filename": "string"
+}
+```
+
+**Example:**
+
+```json
+{
+  "tool": "update_document",
+  "arguments": {
+    "filename": "docs/updated-file.md"
+  }
+}
+```
+
+### refresh_index
+
+Scan the directory and ingest any new or modified files.
+
+**Input Schema:**
+
+```json
+{}
+```
+
+**Example:**
+
+```json
+{
+  "tool": "refresh_index",
+  "arguments": {}
+}
+```
+
+### Disabling Tools
+
+Set the `DISABLED_TOOLS` environment variable to disable specific tools:
+
+```env
+DISABLED_TOOLS=delete_document,update_document,refresh_index
 ```
