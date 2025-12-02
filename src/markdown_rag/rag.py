@@ -150,9 +150,8 @@ class MarkdownRAG:
 
         self.delete_document(filename)
         logger.info(f"Re-ingesting {filename}")
-        filepath = Path(filename)
-        text = filepath.read_text()
-        self._add_document(filepath, text)
+        text = file_path.read_text()
+        self._add_document(file_path, text)
 
     def delete_document(self, filename: str) -> bool:
         """Delete a document from the vector store."""
@@ -170,7 +169,8 @@ class MarkdownRAG:
                     ].astext
                     == filename
                 )
+                .returning(self.vector_store.EmbeddingStore.id)
             )
-            result = session.execute(stmt)
+            result = session.execute(stmt).scalars().all()
             session.commit()
-            return result is not None
+            return len(result) > 0
