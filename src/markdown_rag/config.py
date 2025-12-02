@@ -40,24 +40,25 @@ class Env(BaseSettings):
         default=1000, description="Maximum requests per day"
     )
 
-    DISABLED_TOOLS: str | None = Field(
-        default=None,
+    DISABLED_TOOLS: list[str] = Field(
+        default_factory=list,
         description="Comma delimited list of MCP tools to disable",
     )
 
-    @field_serializer(
-        "GOOGLE_API_KEY", "POSTGRES_PASSWORD", when_used="always"
-    )
+    @field_serializer("GOOGLE_API_KEY", "POSTGRES_PASSWORD", when_used="always")
     def dump_secret(self, v: SecretStr) -> str:
         """Get secret value."""
         return v.get_secret_value()
 
-    @field_validator("DISABLED_TOOLS", mode="after")
-    def validate_disabled_tools(self, v: str | None) -> list[str]:
+    @field_validator("DISABLED_TOOLS", mode="before")
+    def validate_disabled_tools(v: str | list[str] | None) -> list[str]:
         """Parse and validate comma delimited list."""
         if v is None:
             return []
-        tools = [tool.lower() for tool in v.split(",")]
+        if isinstance(v, list):
+            tools = [tool.lower() for tool in v]
+        else:
+            tools = [tool.lower() for tool in v.split(",")]
         allowed_tools = [
             "query",
             "refresh_index",
@@ -67,7 +68,7 @@ class Env(BaseSettings):
         ]
         for tool in tools:
             if tool not in allowed_tools:
-                raise ValidationError(f"Invalid tool: {tool}")
+                raise ValueError(f"Invalid tool: {tool}")
         return tools
 
     @property

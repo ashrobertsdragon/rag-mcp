@@ -113,9 +113,15 @@ def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
             logger.exception(f"Failed to refresh index: {e}")
             return ErrorResponse(error=e)
 
-    for tool in [query, list_documents, delete_document, update_document, refresh_index]:
+    for tool in [
+        query,
+        list_documents,
+        delete_document,
+        update_document,
+        refresh_index,
+    ]:
         if tool.__name__ not in disabled_tools:
-            mcp.add_tool(tool)
+            mcp.add_tool(tool)  # type: ignore
     mcp.run(transport="stdio")
 
 
@@ -139,11 +145,9 @@ def main() -> None:
             sys.exit(1)
     elif args.command == Command.MCP:
         logger.debug("Starting MCP server")
-        run_mcp(rag, disabled_tools=args.disabled_tools)
+        run_mcp(rag, disabled_tools=settings.DISABLED_TOOLS)
     else:
-        logger.error(
-            f"Received command {args.command}, expected INGEST or MCP"
-        )
+        logger.error(f"Received command {args.command}, expected INGEST or MCP")
 
 
 if __name__ == "__main__":
