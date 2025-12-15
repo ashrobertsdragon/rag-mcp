@@ -147,7 +147,9 @@ def main() -> None:
         logger.debug("Starting MCP server")
         run_mcp(rag, disabled_tools=settings.DISABLED_TOOLS)
     else:
-        logger.error(f"Received command {args.command}, expected INGEST or MCP")
+        logger.error(
+            f"Received command {args.command}, expected INGEST or MCP"
+        )
 
 
 if __name__ == "__main__":

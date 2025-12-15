@@ -363,7 +363,7 @@ class RateLimiter:
 
             if batch_size < 1:
                 self.wait_if_needed(texts)
-                continue
+                batch_size = 1
 
             batch = texts[:batch_size]
             self.wait_if_needed(batch)

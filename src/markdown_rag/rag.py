@@ -100,10 +100,11 @@ class MarkdownRAG:
             return
 
         logger.info(f"Ingesting {filename}")
-        self.vector_store.add_documents(
-            self._split_text(str(text)),
-            metadata={"filename": filename},
-        )
+        docs = self._split_text(str(text))
+        for doc in docs:
+            doc.metadata["filename"] = filename
+
+        self.vector_store.add_documents(docs)
 
     def ingest(self) -> None:
         """Add documents to the vector store."""
