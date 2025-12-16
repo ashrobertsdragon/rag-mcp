@@ -327,7 +327,7 @@ class RateLimiter:
 
         max_requests = min(available_minute, available_day)
         if max_requests < 1:
-            return 0
+            return 1
 
         cumulative_tokens = 0
         for i, text in enumerate(texts):
@@ -339,7 +339,7 @@ class RateLimiter:
                 return max(1, i)
             cumulative_tokens += tokens
 
-        return len(texts)
+        return max(1, len(texts))
 
     def generate_batches(
         self, texts: list[str]
@@ -360,10 +360,6 @@ class RateLimiter:
             self._tracker.cleanup_old(current_time)
 
             batch_size = self._calculate_batch_size(texts, current_time)
-
-            if batch_size < 1:
-                self.wait_if_needed(texts)
-                continue
 
             batch = texts[:batch_size]
             self.wait_if_needed(batch)
