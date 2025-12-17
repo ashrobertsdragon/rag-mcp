@@ -527,10 +527,21 @@ class Env(BaseSettings):
     POSTGRES_PASSWORD: SecretStr = Field(default=...)
     POSTGRES_HOST: str = Field(default="localhost")
     POSTGRES_PORT: str = Field(default="5432")
-    POSTGRES_DB: str = Field(default="embeddings")
-    GOOGLE_API_KEY: SecretStr = Field(default=...)
+    POSTGRES_DB: str | None = Field(default=None)
+    DISABLED_TOOLS: list[str] = Field(default_factory=list)
+    CHUNK_OVERLAP: int = Field(default=50)
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = Field(default=100)
     RATE_LIMIT_REQUESTS_PER_DAY: int = Field(default=1000)
+
+class GoogleEnv(Env):
+    GOOGLE_API_KEY: SecretStr = Field(default=...)
+    GOOGLE_MODEL: str = Field(default="models/gemini-embedding-001")
+    GOOGLE_CHUNK_SIZE: int = Field(default=2000)
+
+class OllamaEnv(Env):
+    OLLAMA_HOST: str = Field(default="http://localhost:11434")
+    OLLAMA_MODEL: str = Field(default="mxbai-embed-large")
+    OLLAMA_CHUNK_SIZE: int = Field(default=500)
 ```
 
 Environment variable configuration with Pydantic validation.
@@ -565,7 +576,9 @@ connection_string = settings.postgres_connection
 class CLIArgs(BaseSettings):
     directory: CliPositionalArg[Path] = Field(default=...)
     command: Command = Field(default=Command.MCP)
+    engine: EmbeddingEngine = Field(default=EmbeddingEngine.GOOGLE)
     level: LogLevel = Field(default=LogLevel.WARNING)
+    env_file: Path = Field(default=Path(".env"))
 ```
 
 Command-line argument parser using Pydantic.

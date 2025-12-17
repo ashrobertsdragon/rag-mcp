@@ -4,7 +4,7 @@ A Retrieval Augmented Generation (RAG) system for markdown documentation with in
 
 ## Features
 
-- **Semantic Search**: Vector-based similarity search using Google Gemini embeddings
+- **Semantic Search**: Vector-based similarity search using Google Gemini or Ollama embeddings
 - **Markdown-Aware Chunking**: Intelligent document splitting that preserves semantic boundaries
 - **Rate Limiting**: Sophisticated sliding window algorithm with token counting and batch optimization
 - **MCP Server**: Model Context Protocol server for AI assistant integration
@@ -22,31 +22,35 @@ git clone https://github.com/yourusername/markdown-rag.git
 
 - Python 3.11+
 - PostgreSQL 12+ with [pgvector extension installed](https://github.com/pgvector/pgvector#installation)
-- Google Gemini API key
+- Google Gemini API key (if using Google embeddings)
+- Ollama (if using local embeddings)
 - MCP-compatible client (Claude Desktop, Cline, etc.)
 
 ## Quick Start
 
-### 1. Set Up PostgreSQL
+### 1. (Optional) Set Up PostgreSQL
 
 ```bash
 createdb embeddings
 ```
 
-The pgvector extension will be automatically enabled when you first run the tool.
+If you do not create a database, the tool will create one for you. The pgvector extension will be automatically enabled when you first run the tool.
 
 ### 2. Ingest Documents
 
 ```bash
 cd markdown-rag
-uv run markdown-rag /path/to/docs --command ingest
+# Use Google Gemini
+uv run markdown-rag /path/to/docs --command ingest --engine google
+# Or use Ollama
+uv run markdown-rag /path/to/docs --command ingest --engine ollama
 ```
 
 **Required environment variables** (create `.env` or export):
 
 ```env
 POSTGRES_PASSWORD=your_password
-GOOGLE_API_KEY=your_gemini_api_key
+GOOGLE_API_KEY=your_gemini_api_key  # Only if using Google engine
 ```
 
 ### 3. Configure MCP Client
@@ -97,13 +101,16 @@ Add to your MCP client configuration (e.g., `claude_desktop_config.json`). The c
       "env": {
         "POSTGRES_USER": "postgres_username",
         "POSTGRES_PASSWORD": "your_password",
-        "POSTGRES_HOST": "postgres_url",
-        "POSTGRES_PORT": "1234", # Postgres connection URL port number
-        "POSTGRES_DB": "embeddings",
+        "DISABLED_TOOLS": "delete_document,update_document",
+        "CHUNK_OVERLAP": 50,
+        # Google Configuration
         "GOOGLE_API_KEY": "your_api_key",
-        "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
+        "GOOGLE_MODEL": "models/gemini-embedding-001",
         "RATE_LIMIT_REQUESTS_PER_DAY": "1000",
-        "DISABLED_TOOLS": "delete_document,update_document"
+        "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
+        # Ollama Configuration
+        "OLLAMA_HOST": "http://localhost:11434",
+        "OLLAMA_MODEL": "mxbai-embed-large",
       }
     }
   }
@@ -155,11 +162,14 @@ DISABLED_TOOLS=delete_document,update_document,refresh_index
 | `POSTGRES_PASSWORD`              | -            | **Yes**  | PostgreSQL password                      |
 | `POSTGRES_HOST`                  | `localhost`  | No       | PostgreSQL host                          |
 | `POSTGRES_PORT`                  | `5432`       | No       | PostgreSQL port                          |
-| `POSTGRES_DB`                    | `embeddings` | No       | Database name                            |
-| `GOOGLE_API_KEY`                 | -            | **Yes**  | Google Gemini API key                    |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100`        | No       | Max API requests per minute              |
-| `RATE_LIMIT_REQUESTS_PER_DAY`    | `1000`       | No       | Max API requests per day                 |
-| `DISABLED_TOOLS`                 | -            | No       | Comma-separated list of tools to disable |
+| `POSTGRES_DB`                    | `[engine]_embeddings` | No       | Database name                            |
+| `GOOGLE_API_KEY`                 | -                     | **Yes*** | Google Gemini API key (*if using Google) |
+| `GOOGLE_MODEL`                   | `models/gemini...`    | No       | Google embedding model                   |
+| `OLLAMA_HOST`                    | `http://localhost...` | No       | Ollama host URL                          |
+| `OLLAMA_MODEL`                   | `mxbai-embed-large`   | No       | Ollama embedding model                   |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100`                 | No       | Max API requests per minute              |
+| `RATE_LIMIT_REQUESTS_PER_DAY`    | `1000`                | No       | Max API requests per day                 |
+| `DISABLED_TOOLS`                 | -                     | No       | Comma-separated list of tools to disable |
 
 ### Command Line Options
 
@@ -176,14 +186,15 @@ uv run markdown-rag <directory> [OPTIONS]
 - `-c, --command {ingest|mcp}`: Operation mode (default: `mcp`)
   - `ingest`: Process and store documents
   - `mcp`: Start MCP server for queries
+- `-e, --engine {google|ollama}`: Embedding engine (default: `google`)
 - `-l, --level {debug|info|warning|error}`: Logging level (default: `warning`)
 
 **Examples:**
 
 ```bash
-uv run markdown-rag ./docs --command ingest --level info
+uv run markdown-rag ./docs --command ingest --level info --engine ollama
 
-uv run markdown-rag /var/docs -c ingest -l debug
+uv run markdown-rag /var/docs -c ingest -l debug -e google
 ```
 
 ## Architecture
