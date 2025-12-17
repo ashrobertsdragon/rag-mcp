@@ -7,7 +7,6 @@ license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "langchain>=1.1.0",
-    "langchain-google-genai>=3.2.0",
     "langchain-postgres>=0.0.16",
     "langchain-text-splitters>=1.0.0",
     "mcp>=1.22.0",
@@ -16,6 +15,14 @@ dependencies = [
 
 [project.scripts]
 markdown-rag = "markdown_rag:main"
+
+[project.optional-dependencies]
+google = [
+    "langchain-google-genai>=4.1.1",
+]
+ollama = [
+    "langchain-ollama>=1.0.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
