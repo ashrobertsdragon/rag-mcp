@@ -14,7 +14,7 @@ from langchain_text_splitters import (
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .models import RagResponse
+from markdown_rag.models import RagResponse
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,8 @@ class MarkdownRAG:
         self,
         directory: Path,
         *,
+        chunk_size: int = 2000,
+        chunk_overlap: int = 50,
         vector_store: PGVector,
         embeddings_model: Embeddings,
         session_factory: Callable[[], Session],
@@ -47,8 +49,8 @@ class MarkdownRAG:
         )
         logger.debug("Initializing recursive text splitter")
         self._recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,
-            chunk_overlap=50,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", " ", ""],
         )
 
@@ -101,7 +103,7 @@ class MarkdownRAG:
 
         logger.info(f"Ingesting {filename}")
         self.vector_store.add_documents(
-            self._split_text(str(text)),
+            self._split_text(text),
             metadata={"filename": filename},
         )
 

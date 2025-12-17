@@ -109,10 +109,14 @@ class UsageTracker:
     ) -> float | None:
         """Find the oldest request timestamp within a window."""
         cutoff = current_time - window
-        for req in self._requests:
-            if req.timestamp > cutoff:
-                return req.timestamp
-        return None
+        return next(
+            (
+                req.timestamp
+                for req in self._requests
+                if req.timestamp > cutoff
+            ),
+            None,
+        )
 
     def _calculate_stats(self, current_time: float) -> UsageStats:
         """Calculate usage stats by scanning the deque once."""
@@ -204,24 +208,21 @@ class RateLimiter:
         wait_times = []
 
         if stats.minute_requests >= self.max_requests_per_minute:
-            oldest = self._tracker.find_oldest_in_window(
+            if oldest := self._tracker.find_oldest_in_window(
                 current_time, self.minute_window
-            )
-            if oldest:
+            ):
                 wait_times.append(oldest - (current_time - self.minute_window))
 
         if stats.day_requests >= self.max_requests_per_day:
-            oldest = self._tracker.find_oldest_in_window(
+            if oldest := self._tracker.find_oldest_in_window(
                 current_time, self.day_window
-            )
-            if oldest:
+            ):
                 wait_times.append(oldest - (current_time - self.day_window))
 
         if total_tokens > self.max_tokens_per_minute:
-            oldest = self._tracker.find_oldest_in_window(
+            if oldest := self._tracker.find_oldest_in_window(
                 current_time, self.minute_window
-            )
-            if oldest:
+            ):
                 wait_times.append(oldest - (current_time - self.minute_window))
 
         return max(wait_times, default=0.0), stats
