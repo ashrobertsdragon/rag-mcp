@@ -46,6 +46,7 @@ uv sync --google | --ollama
 # Optional: Create a PostgreSQL database
 createdb embeddings
 ```
+
 If a database is not present, one will be created for you. The pgvector extension will be automatically enabled when you first run the tool.
 
 ## Configuration
@@ -60,8 +61,6 @@ POSTGRES_PASSWORD=your_secure_password
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=embeddings
-
-GOOGLE_API_KEY=your_gemini_api_key_here
 
 GOOGLE_API_KEY=your_gemini_api_key_here  # Only if using Google
 GOOGLE_MODEL=models/gemini-embedding-001 # Optional
