@@ -52,8 +52,8 @@ def start_store(
 def main() -> None:
     """Entry point for the RAG system."""
     args = get_cli_args()
-    env = get_env(args.engine)
-    settings = env(_env_file=args.env_file)
+    env_class = get_env(args.engine)
+    settings = env_class(_env_file=args.env_file)
 
     logging.basicConfig(level=args.level.value)
     logger.debug(f"Log level set to {logger.getEffectiveLevel()}")
