@@ -44,16 +44,6 @@ class Env(BaseSettings):
         default=1000, description="Maximum requests per day"
     )
 
-    _postgres_root_connection: str | None = None
-    _postgres_connection: str | None = None
-    _db_name: str | None = None
-    _registry: ClassVar[dict[str, type["Env"]]] = {}
-
-    @field_serializer("POSTGRES_PASSWORD", when_used="always")
-    def dump_secret(self, v: SecretStr) -> str:
-        """Get secret value."""
-        return v.get_secret_value()
-
     @field_validator("DISABLED_TOOLS", mode="before")
     @classmethod
     def validate_disabled_tools(cls, v: str | list[str] | None) -> list[str]:
@@ -74,60 +64,38 @@ class Env(BaseSettings):
 
         if not v:
             return []
-        if isinstance(v, list):
-            tools = [_validate_tool(tool) for tool in v if tool.strip()]
-        else:
-            tools = [_validate_tool(tool.strip()) for tool in v.split(",")]
+        tools = v if isinstance(v, list) else v.split(",")
+        return [_validate_tool(tool) for tool in tools if tool.strip()]
 
-        return tools
+    @property
+    def embedding_engine(self) -> EmbeddingEngine:
+        """Embedding engine to retrieve settings for."""
+        raise NotImplementedError
 
     @property
     def postgres_root_connection(self) -> str:
         """Postgres connection string to without database."""
-        if self._postgres_root_connection is None:
-            schema = "postgresql+psycopg"
-            pw = self.POSTGRES_PASSWORD.get_secret_value()
-            auth = f"{self.POSTGRES_USER}:{pw}"
-            url = f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}"
+        schema = "postgresql+psycopg"
+        pw = self.POSTGRES_PASSWORD.get_secret_value()
+        auth = f"{self.POSTGRES_USER}:{pw}"
+        url = f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}"
 
-            self._postgres_root_connection = PostgresDsn(
-                f"{schema}://{auth}@{url}"
-            ).encoded_string()
-
-        return self._postgres_root_connection
+        return PostgresDsn(f"{schema}://{auth}@{url}").encoded_string()
 
     @property
     def postgres_connection(self) -> str:
         """Postgres connection string."""
-        if self._postgres_connection is None:
-            self._postgres_connection = (
-                f"{self.postgres_root_connection}/{self.db_name}"
-            )
-        return self._postgres_connection
-
-    @property
-    def embedding_engine(self) -> str:
-        """Get embedding engine name."""
-        raise NotImplementedError
+        return f"{self.postgres_root_connection}/{self.db_name}"
 
     @property
     def db_name(self) -> str:
         """Set default postgres db."""
-        if self._db_name is None:
-            self._db_name = (
-                self.POSTGRES_DB or f"{self.embedding_engine}_embeddings"
-            )
-        return self._db_name
+        return self.POSTGRES_DB or f"{self.embedding_engine}_embeddings"
 
     @property
     def chunk_size(self) -> int:
         """Get chunk size."""
         raise NotImplementedError
-
-    def __init_subclass__(cls, **kwargs):
-        """Register subclass."""
-        super().__init_subclass__(**kwargs)
-        cls._registry[cls.embedding_engine] = cls
 
     def __repr__(self) -> str:
         """Get string representation."""
@@ -145,7 +113,7 @@ class GoogleEnv(Env):
     GOOGLE_MODEL: str = Field(default="models/gemini-embedding-001")
     GOOGLE_CHUNK_SIZE: int = Field(default=2000)
 
-    embedding_engine: ClassVar[str] = "google"
+    embeding_engine: ClassVar[EmbeddingEngine] = EmbeddingEngine.GOOGLE
 
     @field_serializer("GOOGLE_API_KEY", when_used="always")
     def dump_google_secret(self, v: SecretStr) -> str:
@@ -165,7 +133,7 @@ class OllamaEnv(Env):
     OLLAMA_MODEL: str = Field(default="mxbai-embed-large")
     OLLAMA_CHUNK_SIZE: int = Field(default=500)
 
-    embedding_engine: ClassVar[str] = "ollama"
+    embeding_engine: ClassVar[EmbeddingEngine] = EmbeddingEngine.OLLAMA
 
     @property
     def chunk_size(self) -> int:
@@ -193,11 +161,17 @@ class CLIArgs(BaseSettings):
     env_file: Path = Field(default=Path(".env"))
 
 
+ENGINES: dict[EmbeddingEngine, type[Env]] = {
+    EmbeddingEngine.GOOGLE: GoogleEnv,
+    EmbeddingEngine.OLLAMA: OllamaEnv,
+}
+
+
 def get_cli_args() -> CLIArgs:
     """Get command line arguments."""
     return CliApp.run(CLIArgs)
 
 
-def get_env(engine: EmbeddingEngine) -> Env:
+def get_env(engine: EmbeddingEngine) -> type[Env]:
     """Get environment settings."""
-    return Env._registry[engine.lower()]
+    return ENGINES[engine]
