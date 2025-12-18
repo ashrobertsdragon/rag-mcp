@@ -27,7 +27,8 @@ Before you begin, ensure you have:
 
 - Python 3.11 or higher
 - PostgreSQL 12+ with pgvector extension installed
-- A Google Gemini API key
+- A Google Gemini API key (for Google embeddings)
+- Ollama installed and running (for local embeddings)
 - Markdown documentation to index
 
 ## Installation
@@ -40,10 +41,13 @@ Install PostgreSQL and pgvector extension following the [pgvector installation g
 
 ```bash
 git clone https://github.com/yourusername/markdown-rag.git
+# Install dependencies
+uv sync --google | --ollama
+# Optional: Create a PostgreSQL database
 createdb embeddings
 ```
 
-The pgvector extension will be automatically enabled when you first run the tool.
+If a database is not present, one will be created for you. The pgvector extension will be automatically enabled when you first run the tool.
 
 ## Configuration
 
@@ -58,7 +62,14 @@ POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=embeddings
 
-GOOGLE_API_KEY=your_gemini_api_key_here
+GOOGLE_API_KEY=your_gemini_api_key_here  # Only if using Google
+GOOGLE_MODEL=models/gemini-embedding-001 # Optional
+GOOGLE_CHUNK_SIZE=2000 # Optional
+
+# Or for Ollama
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=mxbai-embed-large
+OLLAMA_CHUNK_SIZE=500
 
 RATE_LIMIT_REQUESTS_PER_MINUTE=100
 RATE_LIMIT_REQUESTS_PER_DAY=1000
@@ -79,8 +90,11 @@ RATE_LIMIT_REQUESTS_PER_DAY=1000
 | `POSTGRES_PASSWORD`              | Database password | *required*   | Never commit this to version control                           |
 | `POSTGRES_HOST`                  | Database server   | `localhost`  | Use hostname or IP for remote databases                        |
 | `POSTGRES_PORT`                  | Database port     | `5432`       | PostgreSQL default port                                        |
-| `POSTGRES_DB`                    | Database name     | `embeddings` | Create separate databases for different projects               |
-| `GOOGLE_API_KEY`                 | Gemini API key    | *required*   | Get from Google AI Studio                                      |
+| `POSTGRES_DB`                    | Database name     | `[engine]_embeddings` | Defaults to `{engine}_embeddings`              |
+| `GOOGLE_API_KEY`                 | Gemini API key    | *required*            | Get from Google AI Studio (if using Google)    |
+| `GOOGLE_MODEL`                   | Model name        | `models/gemini...`    | Google embedding model                         |
+| `OLLAMA_HOST`                    | Ollama host       | `http://localhost...` | URL of Ollama server                           |
+| `OLLAMA_MODEL`                   | Model name        | `mxbai-embed-large`   | Ollama embedding model                         |
 | `RATE_LIMIT_REQUESTS_PER_MINUTE` | API rate limit    | `100`        | Adjust based on your API quota                                 |
 | `RATE_LIMIT_REQUESTS_PER_DAY`    | Daily API limit   | `1000`       | Adjust based on your API quota                                 |
 | `DISABLED_TOOLS`                 | Disabled tools    | -            | Comma-separated list (e.g., `delete_document,update_document`) |
@@ -92,6 +106,8 @@ RATE_LIMIT_REQUESTS_PER_DAY=1000
 ```bash
 cd markdown-rag
 uv run markdown-rag /path/to/docs --command ingest
+# Or use Ollama
+uv run markdown-rag /path/to/docs --command ingest --engine ollama
 ```
 
 ### What Happens During Ingestion
@@ -158,6 +174,7 @@ uv run markdown-rag ./docs --command ingest --level info
         "POSTGRES_PORT": "1234", # Postgres connection URL port number
         "POSTGRES_DB": "embeddings",
         "GOOGLE_API_KEY": "your_api_key",
+        # ... other Google or Ollama settings ...
         "RATE_LIMIT_REQUESTS_PER_MINUTE": "100",
         "RATE_LIMIT_REQUESTS_PER_DAY": "1000",
         "DISABLED_TOOLS": "delete_document,update_document"

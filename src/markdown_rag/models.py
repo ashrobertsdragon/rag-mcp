@@ -12,6 +12,13 @@ class Command(StrEnum):
     MCP = "mcp"
 
 
+class EmbeddingEngine(StrEnum):
+    """Embedding engines for the RAG system."""
+
+    GOOGLE = "google"
+    OLLAMA = "ollama"
+
+
 class LogLevel(IntEnum):
     """Log levels for the RAG system."""
 

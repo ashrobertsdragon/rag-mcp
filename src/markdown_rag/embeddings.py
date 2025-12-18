@@ -5,7 +5,7 @@ import logging
 from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from .rate_limiter import RateLimiter
+from markdown_rag.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
