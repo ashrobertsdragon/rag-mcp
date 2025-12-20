@@ -14,7 +14,7 @@ from langchain_text_splitters import (
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from markdown_rag.models import RagResponse
+from markdown_rag.models import MultiResponse, RagResponse
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class MarkdownRAG:
         for file, pth in self._iterate_paths(self.directory):
             self._add_document(pth, file)
 
-    def query(self, query: str, num_results: int = 4) -> list[RagResponse]:
+    def query(self, query: str, num_results: int = 4) -> MultiResponse:
         """Retrieve information to help answer a query."""
         docs = self.vector_store.similarity_search(query, k=num_results)
         return [
@@ -123,7 +123,7 @@ class MarkdownRAG:
             for doc in docs
         ]
 
-    def list_documents(self) -> list[str]:
+    def list_documents(self) -> MultiResponse:
         """List all documents in the vector store."""
         with self._session_factory() as session:
             collection = self.vector_store.get_collection(session)

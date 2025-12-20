@@ -2,7 +2,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
-from markdown_rag.models import ErrorResponse, RagResponse
+from markdown_rag.models import MultiResponse, ToolResponse
 from markdown_rag.rag import MarkdownRAG
 
 logger = logging.getLogger("MarkdownRAG")
@@ -10,54 +10,58 @@ logger = logging.getLogger("MarkdownRAG")
 
 def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
     """Run the MCP server."""
+    logger.debug("Starting MCP server")
     mcp = FastMCP()
+    logger.debug("Server started")
 
-    def query(
-        query: str, num_results: int = 4
-    ) -> list[RagResponse] | ErrorResponse:
+    def query(query: str, num_results: int = 4) -> ToolResponse:
         if num_results <= 0:
-            return ErrorResponse(
-                error=ValueError("num_results must be a positive integer.")
+            return ToolResponse(
+                success=False,
+                error="num_results must be a positive integer.",
             )
         try:
-            return rag.query(query, num_results=num_results)
+            results: MultiResponse = rag.query(query, num_results=num_results)
+            return ToolResponse(data=results)
         except Exception as e:
             logger.exception(f"Failed to query: {e}")
-            return ErrorResponse(error=e)
+            return ToolResponse(success=False, error=str(e))
 
-    def list_documents() -> list[str] | ErrorResponse:
+    def list_documents() -> ToolResponse:
         """List all documents in the vector store."""
         try:
-            return rag.list_documents()
+            docs: MultiResponse = rag.list_documents()
+            return ToolResponse(data=docs)
         except Exception as e:
             logger.exception(f"Failed to list documents: {e}")
-            return ErrorResponse(error=e)
+            return ToolResponse(success=False, error=str(e))
 
-    def delete_document(filename: str) -> bool | ErrorResponse:
+    def delete_document(filename: str) -> ToolResponse:
         """Delete a document from the vector store."""
         try:
-            return rag.delete_document(filename)
+            result: bool = rag.delete_document(filename)
+            return ToolResponse(data=result)
         except Exception as e:
             logger.exception(f"Failed to delete document: {e}")
-            return ErrorResponse(error=e)
+            return ToolResponse(success=False, error=str(e))
 
-    def update_document(filename: str) -> bool | ErrorResponse:
+    def update_document(filename: str) -> ToolResponse:
         """Update/refresh a specific document in the vector store."""
         try:
             rag.refresh_document(filename)
-            return True
+            return ToolResponse(success=True)
         except Exception as e:
             logger.exception(f"Failed to update document: {e}")
-            return ErrorResponse(error=e)
+            return ToolResponse(success=False, error=str(e))
 
-    def refresh_index() -> bool | ErrorResponse:
+    def refresh_index() -> ToolResponse:
         """Refresh the entire index (ingest new files)."""
         try:
             rag.ingest()
-            return True
+            return ToolResponse(success=True)
         except Exception as e:
             logger.exception(f"Failed to refresh index: {e}")
-            return ErrorResponse(error=e)
+            return ToolResponse(success=False, error=str(e))
 
     for tool in [
         query,

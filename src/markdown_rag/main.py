@@ -53,15 +53,20 @@ def main() -> None:
     """Entry point for the RAG system."""
     args = get_cli_args()
     env_class = get_env(args.engine)
-    settings = env_class(_env_file=args.env_file)
+    settings = (
+        env_class(_env_file=args.env_file) if args.env_file else env_class()
+    )
 
     logging.basicConfig(level=args.level.value)
     logger.debug(f"Log level set to {logger.getEffectiveLevel()}")
-
+    logger.debug(f"Starting RAG system in {args.command} mode")
     try:
         rag = start_store(args.directory, settings, args.engine)
     except Exception as e:
-        logger.exception(f"Failed to start store: {e}", exc_info=False)
+        logger.exception(
+            f"Failed to start store: ({e.__class__.__name__}) {e}",
+            exc_info=False,
+        )
         sys.exit(1)
     if args.command == Command.INGEST:
         logger.debug("Ingesting files")

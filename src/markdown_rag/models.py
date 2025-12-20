@@ -1,8 +1,11 @@
 """Data models for the RAG system."""
 
 from enum import IntEnum, StrEnum
+from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict
+
+DocName: TypeAlias = str
 
 
 class Command(StrEnum):
@@ -35,9 +38,14 @@ class RagResponse(BaseModel):
     content: str
 
 
-class ErrorResponse(BaseModel):
-    """MCP error response for the RAG system."""
+MultiResponse: TypeAlias = list[RagResponse] | list[DocName]
+
+
+class ToolResponse(BaseModel):
+    """Unified response model for MCP tools."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    error: Exception
+    error: str | None = None
+    success: bool = True
+    data: MultiResponse | bool | None = None
