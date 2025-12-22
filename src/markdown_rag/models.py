@@ -1,8 +1,9 @@
 """Data models for the RAG system."""
 
 from enum import IntEnum, StrEnum
+from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class Command(StrEnum):
@@ -10,6 +11,9 @@ class Command(StrEnum):
 
     INGEST = "ingest"
     MCP = "mcp"
+    LIST = "list"
+    DELETE = "delete"
+    UPDATE = "update"
 
 
 class EmbeddingEngine(StrEnum):
@@ -35,9 +39,13 @@ class RagResponse(BaseModel):
     content: str
 
 
-class ErrorResponse(BaseModel):
-    """MCP error response for the RAG system."""
+DocName: TypeAlias = str
+MultiResponse: TypeAlias = list[RagResponse] | list[DocName]
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    error: Exception
+class ToolResponse(BaseModel):
+    """Unified response model for MCP tools."""
+
+    error: str | None = None
+    success: bool = True
+    data: MultiResponse | bool | None = None

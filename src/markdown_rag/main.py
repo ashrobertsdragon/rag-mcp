@@ -53,30 +53,54 @@ def main() -> None:
     """Entry point for the RAG system."""
     args = get_cli_args()
     env_class = get_env(args.engine)
-    settings = env_class(_env_file=args.env_file)
+    settings = (
+        env_class(_env_file=args.env_file) if args.env_file else env_class()
+    )
 
     logging.basicConfig(level=args.level.value)
     logger.debug(f"Log level set to {logger.getEffectiveLevel()}")
+    logger.debug(f"Starting RAG system in {args.command} mode")
 
     try:
         rag = start_store(args.directory, settings, args.engine)
     except Exception as e:
-        logger.exception(f"Failed to start store: {e}", exc_info=False)
-        sys.exit(1)
-    if args.command == Command.INGEST:
-        logger.debug("Ingesting files")
-        try:
-            rag.ingest()
-        except Exception as e:
-            logger.exception(f"Failed to ingest files: {e}", exc_info=False)
-            sys.exit(1)
-    elif args.command == Command.MCP:
-        logger.debug("Starting MCP server")
-        run_mcp(rag, disabled_tools=settings.DISABLED_TOOLS)
-    else:
-        logger.error(
-            f"Received command {args.command}, expected INGEST or MCP"
+        logger.exception(
+            f"Failed to start store: ({e.__class__.__name__}) {e}"
         )
+        sys.exit(1)
+
+    try:
+        match args.command:
+            case Command.MCP:
+                logger.debug("Starting MCP server")
+                run_mcp(rag, settings.DISABLED_TOOLS)
+            case Command.INGEST:
+                logger.debug("Ingesting files")
+                rag.ingest()
+            case Command.LIST:
+                logger.debug("Listing documents")
+                documents = rag.list_documents()
+                logger.debug("Documents:")
+                print("Documents:")
+                for doc in documents:
+                    logger.debug(doc)
+                    print(doc)
+            case Command.DELETE:
+                if not args.filename:
+                    raise ValueError("Filename is required for delete command")
+                logger.debug("Deleting document")
+                rag.delete_document(args.filename)
+            case Command.UPDATE:
+                if not args.filename:
+                    raise ValueError("Filename is required for update command")
+                logger.debug("Updating document")
+                rag.refresh_document(args.filename)
+            case _:
+                logger.error(f"Unknown command {args.command}")
+                sys.exit(1)
+    except Exception as e:
+        logger.exception(f"Failed to run command: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

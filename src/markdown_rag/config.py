@@ -1,7 +1,6 @@
 """Configuration and command-line argument parsing."""
 
 from pathlib import Path
-from typing import ClassVar
 
 from pydantic import (
     AliasChoices,
@@ -23,6 +22,8 @@ from markdown_rag.models import Command, EmbeddingEngine, LogLevel
 
 class Env(BaseSettings):
     """Base environment settings."""
+
+    model_config = SettingsConfigDict(extra="ignore")
 
     POSTGRES_USER: str = Field(default="postgres")
     POSTGRES_PASSWORD: SecretStr = Field(default=...)
@@ -113,7 +114,10 @@ class GoogleEnv(Env):
     GOOGLE_MODEL: str = Field(default="models/gemini-embedding-001")
     GOOGLE_CHUNK_SIZE: int = Field(default=2000)
 
-    embeding_engine: ClassVar[EmbeddingEngine] = EmbeddingEngine.GOOGLE
+    @property
+    def embedding_engine(self) -> EmbeddingEngine:
+        """Embedding engine to retrieve settings for."""
+        return EmbeddingEngine.GOOGLE
 
     @field_serializer("GOOGLE_API_KEY", when_used="always")
     def dump_google_secret(self, v: SecretStr) -> str:
@@ -133,7 +137,10 @@ class OllamaEnv(Env):
     OLLAMA_MODEL: str = Field(default="mxbai-embed-large")
     OLLAMA_CHUNK_SIZE: int = Field(default=500)
 
-    embeding_engine: ClassVar[EmbeddingEngine] = EmbeddingEngine.OLLAMA
+    @property
+    def embedding_engine(self) -> EmbeddingEngine:
+        """Embedding engine to retrieve settings for."""
+        return EmbeddingEngine.OLLAMA
 
     @property
     def chunk_size(self) -> int:
@@ -158,7 +165,10 @@ class CLIArgs(BaseSettings):
     level: LogLevel = Field(
         default=LogLevel.WARNING, validation_alias=AliasChoices("l", "level")
     )
-    env_file: Path = Field(default=Path(".env"))
+    env_file: Path | None = Field(default=None, validation_alias="env-file")
+    filename: str | None = Field(
+        default=None, validation_alias=AliasChoices("f", "filename")
+    )
 
 
 ENGINES: dict[EmbeddingEngine, type[Env]] = {

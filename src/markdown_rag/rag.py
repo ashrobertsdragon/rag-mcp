@@ -102,10 +102,14 @@ class MarkdownRAG:
             return
 
         logger.info(f"Ingesting {filename}")
-        self.vector_store.add_documents(
-            self._split_text(text),
-            metadata={"filename": filename},
-        )
+        docs: list[Document] = self._split_text(text)
+        texts: list[str] = []
+        metadatas: list[dict[str, str]] = []
+        for doc in docs:
+            texts.append(doc.page_content)
+            metadatas.append({**doc.metadata, "filename": filename})
+
+        self.vector_store.add_texts(texts, metadatas=metadatas)
 
     def ingest(self) -> None:
         """Add documents to the vector store."""
@@ -152,7 +156,7 @@ class MarkdownRAG:
 
         self.delete_document(filename)
         logger.info(f"Re-ingesting {filename}")
-        text = file_path.read_text()
+        text = file_path.read_text(encoding="utf-8")
         self._add_document(file_path, text)
 
     def delete_document(self, filename: str) -> bool:
