@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -6,6 +7,24 @@ from markdown_rag.models import MultiResponse, ToolResponse
 from markdown_rag.rag import MarkdownRAG
 
 logger = logging.getLogger("MarkdownRAG")
+
+
+def _run_tool(
+    tool: Callable[..., MultiResponse | bool | None],
+    tool_name: str,
+    kwargs: dict[str, str | int] | None = None,
+) -> ToolResponse:
+    try:
+        result = tool(**kwargs) if kwargs else tool()
+        return ToolResponse(data=result)
+    except Exception as e:
+        logger.exception(
+            f"Failed to run {tool_name}: {e.__class__.__name__}({e})"
+        )
+        return ToolResponse(
+            success=False,
+            error=f"Failed to run {tool_name}: {e.__class__.__name__}({e})",
+        )
 
 
 def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
@@ -18,71 +37,29 @@ def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
                 success=False,
                 error="num_results must be a positive integer.",
             )
-        try:
-            results: MultiResponse = rag.query(query, num_results=num_results)
-            return ToolResponse(data=results)
-        except Exception as e:
-            logger.exception(f"Failed to query: {e.__class__.__name__}({e})")
-            return ToolResponse(
-                success=False,
-                error=f"{e.__class__.__name__}({e.__class__.__name__}({e}))",
-            )
+        return _run_tool(
+            rag.query, "query", {"query": query, "num_results": num_results}
+        )
 
     def list_documents() -> ToolResponse:
         """List all documents in the vector store."""
-        try:
-            docs: MultiResponse = rag.list_documents()
-            return ToolResponse(data=docs)
-        except Exception as e:
-            logger.exception(
-                f"Failed to list documents: {e.__class__.__name__}({e})"
-            )
-            return ToolResponse(
-                success=False,
-                error=f"{e.__class__.__name__}({e.__class__.__name__}({e}))",
-            )
+        return _run_tool(rag.list_documents, "list_documents")
 
     def delete_document(filename: str) -> ToolResponse:
         """Delete a document from the vector store."""
-        try:
-            rag.delete_document(filename)
-            return ToolResponse(data=True)
-        except Exception as e:
-            logger.exception(
-                f"Failed to delete document: {e.__class__.__name__}({e})"
-            )
-            return ToolResponse(
-                success=False,
-                error=f"{e.__class__.__name__}({e.__class__.__name__}({e}))",
-            )
+        return _run_tool(
+            rag.delete_document, "delete_document", {"filename": filename}
+        )
 
     def update_document(filename: str) -> ToolResponse:
         """Update/refresh a specific document in the vector store."""
-        try:
-            rag.refresh_document(filename)
-            return ToolResponse(data=True)
-        except Exception as e:
-            logger.exception(
-                f"Failed to update document: {e.__class__.__name__}({e})"
-            )
-            return ToolResponse(
-                success=False,
-                error=f"{e.__class__.__name__}({e.__class__.__name__}({e}))",
-            )
+        return _run_tool(
+            rag.refresh_document, "update_document", {"filename": filename}
+        )
 
     def refresh_index() -> ToolResponse:
         """Refresh the entire index (ingest new files)."""
-        try:
-            rag.ingest()
-            return ToolResponse(data=True)
-        except Exception as e:
-            logger.exception(
-                f"Failed to refresh index: {e.__class__.__name__}({e})"
-            )
-            return ToolResponse(
-                success=False,
-                error=f"{e.__class__.__name__}({e.__class__.__name__}({e}))",
-            )
+        return _run_tool(rag.ingest, "refresh_index")
 
     for tool in [
         query,
