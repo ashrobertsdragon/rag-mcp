@@ -65,8 +65,7 @@ def main() -> None:
         rag = start_store(args.directory, settings, args.engine)
     except Exception as e:
         logger.exception(
-            f"Failed to start store: ({e.__class__.__name__}) {e}",
-            exc_info=False,
+            f"Failed to start store: ({e.__class__.__name__}) {e}"
         )
         sys.exit(1)
 
@@ -81,9 +80,11 @@ def main() -> None:
             case Command.LIST:
                 logger.debug("Listing documents")
                 documents = rag.list_documents()
-                logger.info("Documents:")
+                logger.debug("Documents:")
+                print("Documents:")
                 for doc in documents:
-                    logger.info(doc)
+                    logger.debug(doc)
+                    print(doc)
             case Command.DELETE:
                 if not args.filename:
                     raise ValueError("Filename is required for delete command")
@@ -98,7 +99,7 @@ def main() -> None:
                 logger.error(f"Unknown command {args.command}")
                 sys.exit(1)
     except Exception as e:
-        logger.exception(f"Failed to run command: {e}", exc_info=False)
+        logger.exception(f"Failed to run command: {e}")
         sys.exit(1)
 
 

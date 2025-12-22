@@ -23,8 +23,7 @@ from markdown_rag.models import Command, EmbeddingEngine, LogLevel
 class Env(BaseSettings):
     """Base environment settings."""
 
-    _env_file: Path | None = None
-    model_config = SettingsConfigDict(env_file=_env_file, extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore")
 
     POSTGRES_USER: str = Field(default="postgres")
     POSTGRES_PASSWORD: SecretStr = Field(default=...)
@@ -166,7 +165,7 @@ class CLIArgs(BaseSettings):
     level: LogLevel = Field(
         default=LogLevel.WARNING, validation_alias=AliasChoices("l", "level")
     )
-    env_file: Path = Field(default=Path(".env"), validation_alias="env-file")
+    env_file: Path | None = Field(default=None, validation_alias="env-file")
     filename: str | None = Field(
         default=None, validation_alias=AliasChoices("f", "filename")
     )
