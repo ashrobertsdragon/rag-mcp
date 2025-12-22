@@ -21,9 +21,10 @@ def create_database(engine: Engine, user: str, db_name: str) -> None:
             return
 
         logger.info(f"Creating database: {db_name}")
+        quoted_db = engine.dialect.identifier_preparer.quote(db_name)
+        quoted_user = engine.dialect.identifier_preparer.quote(user)
         conn.execute(
-            text("CREATE DATABASE :db_name OWNER = :user"),
-            parameters={"db_name": db_name, "user": user},
+            text(f"CREATE DATABASE {quoted_db} OWNER = {quoted_user}")
         )
 
 
