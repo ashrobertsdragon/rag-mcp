@@ -58,10 +58,10 @@ class MarkdownRAG:
         self, directory: Path
     ) -> Generator[tuple[str, Path], None, None]:
         for pth in directory.iterdir():
-            if pth.is_file():
+            if pth.is_dir():
+                yield from self._iterate_paths(pth)
+            elif pth.suffix == ".md":
                 yield pth.read_text("utf-8"), pth
-                continue
-            yield from self._iterate_paths(pth)
 
     def _split_text(self, file: str) -> list[Document]:
         md_docs = self._md_splitter.split_text(file)
