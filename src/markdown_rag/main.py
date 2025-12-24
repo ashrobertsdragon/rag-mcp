@@ -54,7 +54,7 @@ def main() -> None:
     args = get_cli_args()
     env_class = get_env(args.engine)
     settings = (
-        env_class(_env_file=args.env_file) if args.env_file else env_class()
+        env_class(_env_file=args.env_file) if args.env_file else env_class()  # type: ignore[call-arg]
     )
 
     logging.basicConfig(level=args.level.value)
