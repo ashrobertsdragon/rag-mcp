@@ -32,6 +32,12 @@ def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
     mcp = FastMCP()
 
     def query(query: str, num_results: int = 4) -> ToolResponse:
+        """Retrieve information to help answer a query.
+
+        Args:
+            query: The query to ask.
+            num_results: The number of results to retrieve.
+        """
         if num_results <= 0:
             return ToolResponse(
                 success=False,
@@ -46,13 +52,21 @@ def run_mcp(rag: MarkdownRAG, disabled_tools: list[str]) -> None:
         return _run_tool(rag.list_documents, "list_documents")
 
     def delete_document(filename: str) -> ToolResponse:
-        """Delete a document from the vector store."""
+        """Delete a document from the vector store.
+
+        Args:
+            filename: The filename of the document to delete.
+        """
         return _run_tool(
             rag.delete_document, "delete_document", {"filename": filename}
         )
 
     def update_document(filename: str) -> ToolResponse:
-        """Update/refresh a specific document in the vector store."""
+        """Update/refresh a specific document in the vector store.
+
+        Args:
+            filename: The filename of the document to update.
+        """
         return _run_tool(
             rag.refresh_document, "update_document", {"filename": filename}
         )
